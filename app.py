@@ -172,7 +172,7 @@ st.sidebar.caption("Keys stay only in this browser session. They are never saved
 providers = []
 
 with st.sidebar.expander("1. Google Gemini", expanded=True):
-    gem_model = st.text_input("Gemini model name", value="gemini-2.5-flash",
+    gem_model = st.text_input("Gemini model name", value="gemini-3.8-flash",
                               help="Press 'Show Gemini models' below to see the names your key can use.")
     for i in (1, 2, 3):
         k = st.text_input(f"Gemini key {i}", type="password", key=f"gk{i}")
