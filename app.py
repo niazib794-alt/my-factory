@@ -12,7 +12,7 @@ api_key = st.sidebar.text_input("اپنی Gemini API Key یہاں درج کری�
 if api_key:
     genai.configure(api_key=api_key)
 model = genai.GenerativeModel('models/gemini-1.5-flash')
-    prompt = st.text_input("اپنا بزنس آئیڈیا یا موضوع لکھیں:")
+prompt = st.text_input("اپنا بزنس آئیڈیا یا موضوع لکھیں:")
 
     if st.button("بزنس پلان اور ڈیزائن تیار کریں"):
         with st.spinner("8 AI دماغ کام کر رہے ہیں..."):
