@@ -37,7 +37,8 @@ if st.button("بزنس پلان اور ڈیزائن تیار کریں"):
                 genai.configure(api_key=active_gemini_key)
                 
                 # Gemini Pro ماڈل استعمال کریں (Found error سے بچنے کے لیے)
-                model = genai.GenerativeModel('gemini-pro')
+                model = genai.GenerativeModel('gemini-1.5-flash')
+                
                 
                 # متن تیار کرنا (Text Generation)
                 response = model.generate_content(f"Create a detailed business plan for: {prompt}")
