@@ -53,6 +53,8 @@ ROLES = {
     "Product spec": """ROLE: Product writer. Write a page-by-page specification: product name, buyer, age range, file list, and for each page: title, exact on-page text, layout notes (grid, boxes, rows), icon slots. Two paper versions: US Letter (USA, Canada) and A4 (UK, Australia, Europe). 15 mm margin on all sides and a logo zone 5 to 10 mm tall inside the bottom margin. Add a short parent instructions page, calm uncluttered design, and a design brief (colour hex codes, free fonts, icon style).""",
     "Pins and Social": """ROLE: Social content writer. Write: 5 Pinterest pins (title with the main keyword early, description, text on the image, alt text, board name; size 1000 x 1500; one topic per pin), 2 Reels scripts of 5 to 10 seconds (spoken hook in the first 3 seconds, on-screen text, caption), 1 helpful Facebook parent-group post (a tip or question first, not spam), and a 7-day posting plan for one person. Platform tips are working ideas, not rules or promises.""",
 }
+CHAT_ROLE = """ROLE: Business assistant for the owner. Answer his question directly and briefly. For trends or prices, say clearly what is evidence and what is a guess. Stay with the five niches and printable products. Never invent data."""
+PROOF_ROLE = """ROLE: Proof checker. You get a DRAFT and the EVIDENCE it was based on. Keep only the claims that the evidence supports, or that are clearly marked GUESS. Remove invented numbers, prices, rankings, sales claims, and medical or guaranteed-result wording. Reply with: 1) CLEAN TEXT (the corrected draft), 2) REMOVED (each removed claim and why). Urdu script for explanations, English for product text."""
 TAB1_ROLES = ["Research (keywords and market)", "Trend and Gap (Top 5)"]
 TAB2_ROLES = ["Strategy and Price", "SEO and Listing", "QC (check before publishing)"]
 TAB3_ROLES = ["Product spec", "Pins and Social"]
@@ -200,18 +202,41 @@ def call_openai_compatible(base_url, key, model, system, user_text):
     return text, sources
 
 
-def list_models(p):
+def list_models(p, free_only=False):
     """Return model names a provider key can use (to fix 'model not found')."""
     if p["type"] == "gemini":
         r = requests.get(f"{GEMINI_URL}/models?pageSize=100", headers={"x-goog-api-key": p["key"]}, timeout=30)
         if r.status_code != 200:
             raise ProviderError(error_from_response(r, [p["key"]]))
-        return [m["name"].replace("models/", "") for m in r.json().get("models", [])
-                if "generateContent" in m.get("supportedGenerationMethods", [])]
+        return sorted(m["name"].replace("models/", "") for m in r.json().get("models", [])
+                      if "generateContent" in m.get("supportedGenerationMethods", []))
     r = requests.get(p["base"].rstrip("/") + "/models", headers={"Authorization": f"Bearer {p['key']}"}, timeout=30)
     if r.status_code != 200:
         raise ProviderError(error_from_response(r, [p["key"]]))
-    return [m.get("id", "") for m in r.json().get("data", [])]
+    out = []
+    for m in r.json().get("data", []):
+        mid = m.get("id", "")
+        if not mid:
+            continue
+        low = mid.lower()
+        if any(x in low for x in ("whisper", "tts", "guard", "embed", "playai")):
+            continue
+        if free_only and "openrouter" in p["base"]:
+            pr = m.get("pricing") or {}
+            if not (str(pr.get("prompt", "")) == "0" or low.endswith(":free")):
+                continue
+        out.append(mid)
+    return sorted(out)
+
+
+MODEL_HINT = " -> Open 'Show models' in the sidebar, pick a valid name and press 'Use this model'."
+
+
+def with_hint(msg):
+    low = str(msg).lower()
+    if "404" in low or "400" in low or "model" in low or "not found" in low:
+        return str(msg) + MODEL_HINT
+    return str(msg)
 
 
 def run_chain(providers, system, user_text, images, grounding, allow_paid):
@@ -723,6 +748,33 @@ def make_zip(files):
 # =====================================================================
 # UI
 # =====================================================================
+def proof_check(draft, evidence, used):
+    """Ask a DIFFERENT AI family than the one that wrote the draft to remove unsupported claims."""
+    family = used.split(" ")[0] if used else ""
+    others = [p for p in providers if p["name"].split(" ")[0] != family]
+    chain = order_providers(others, PREFS["analysis"])
+    user = "DRAFT:\n" + draft + "\n\nEVIDENCE:\n" + (evidence.strip() or "none (only the owner's task)")
+    return run_chain(chain, SHARED + "\n\n" + PROOF_ROLE, user, [], False, allow_paid)[:3]
+
+
+def preview_pdf(pdfs):
+    """Show the first pages of each built PDF as images (works on phones, unlike PDF iframes)."""
+    try:
+        import pypdfium2 as pdfium
+    except Exception:
+        st.info("Preview library is missing (pypdfium2). Download the PDF to check it.")
+        return
+    for name, data in pdfs.items():
+        try:
+            doc = pdfium.PdfDocument(data)
+            n = min(len(doc), 2)
+            st.caption(f"Preview: {name} (first {n} page(s))")
+            for i in range(n):
+                st.image(doc[i].render(scale=1.3).to_pil())
+        except Exception as e:
+            st.warning("Preview failed: " + mask(e, []))
+
+
 def secret(name):
     try:
         return st.secrets.get(name, "")
@@ -745,7 +797,7 @@ st.sidebar.caption("Keys stay only in this browser session unless you save them 
 
 providers = []
 with st.sidebar.expander("1. Google Gemini", expanded=True):
-    gem_model = st.text_input("Gemini model name", value="gemini-2.5-flash",
+    gem_model = st.text_input("Gemini model name", value="gemini-2.5-flash", key="gemm",
                               help="If you get 'model not found', press 'Show models' and copy a name from the list.")
     for i in (1, 2, 3):
         k = st.text_input(f"Gemini key {i}", type="password", key=f"gk{i}", value=secret(f"GEMINI_KEY_{i}"))
@@ -784,6 +836,11 @@ with st.sidebar.expander("6. Brand and logo"):
     logo_h = st.slider("Logo height (mm)", 5, 10, 8, key="logoh")
     logo_pos = st.radio("Logo position", ["center", "left", "right"], horizontal=True, key="logop")
     logo_bytes = logo_up.getvalue() if logo_up else None
+    if logo_bytes is None and secret("LOGO_B64"):
+        try:
+            logo_bytes = base64.b64decode(secret("LOGO_B64"))
+        except Exception:
+            logo_bytes = None
 
 allow_paid = st.sidebar.checkbox("Allow paid providers (may charge money)", value=False)
 use_grounding = st.sidebar.checkbox("Gemini: use Google Search (free limit not verified)", value=False)
@@ -805,7 +862,7 @@ if c1.button("Test keys"):
                 call_openai_compatible(p["base"], p["key"], p["model"], "Reply with OK.", "Say OK.")
             st.sidebar.success(f"{p['name']}: OK")
         except Exception as e:
-            st.sidebar.error(f"{p['name']}: {mask(e, [p['key']])}")
+            st.sidebar.error(f"{p['name']}: {with_hint(mask(e, [p['key']]))}")
     if tavily_key:
         any_key = True
         try:
@@ -816,21 +873,50 @@ if c1.button("Test keys"):
     if not any_key:
         st.sidebar.warning("Enter at least one key first.")
 
+MODEL_KEYS = {"Gemini": "gemm", "Groq": "grm", "OpenRouter": "orm", "Custom": "cm"}
+
+
+def set_model(provider_name, model):
+    for pre, key in MODEL_KEYS.items():
+        if provider_name.startswith(pre):
+            ss[key] = model
+            return
+
+
 with st.sidebar.expander("Show models (fix model names)"):
     names_with_keys = [p["name"] for p in providers if p["key"]]
     if names_with_keys:
         pick = st.selectbox("Provider", names_with_keys, key="pickp")
+        flt = st.text_input("Filter (for example: llama, flash, free)", key="fltm")
+        free_only = st.checkbox("OpenRouter: free models only", value=True, key="freeonly")
         if st.button("Show models", key="showm"):
             pp = next(p for p in providers if p["name"] == pick)
             try:
-                st.code("\n".join(list_models(pp)) or "no models", language=None)
+                ss["model_list"] = {"provider": pick, "names": list_models(pp, free_only)}
             except Exception as e:
+                ss["model_list"] = None
                 st.error(mask(e, [pp["key"]]))
+        ml = ss.get("model_list")
+        if ml and ml["provider"] == pick:
+            shown = [n for n in ml["names"] if flt.strip().lower() in n.lower()]
+            if shown:
+                st.caption(f"{len(shown)} models found")
+                chosen = st.selectbox("Pick a model", shown[:300], key="chosenm")
+                st.button("Use this model", on_click=set_model, args=(pick, chosen), key="usem")
+            else:
+                st.caption("No model matches the filter.")
     else:
         st.caption("Enter a key first.")
 
 if ss["counts"]:
     st.sidebar.caption("Calls in this session: " + ", ".join(f"{k} {v}" for k, v in ss["counts"].items()))
+
+JOBS = {"research": "Research", "trend": "Trend", "decision": "Decision", "seo": "SEO",
+        "qc": "QC", "spec": "Product spec", "pins": "Pins", "chat": "Chat"}
+with st.sidebar.expander("Which AI does which job"):
+    st.caption("Auto = use the key order above. Pick one AI to try first for a job; if it fails, the others still answer.")
+    for jk, jl in JOBS.items():
+        st.selectbox(jl, ["Auto", "Gemini", "Groq", "OpenRouter", "Custom"], key=f"jobpref_{jk}")
 
 PREFS = {
     "analysis": ["Gemini", "Groq", "OpenRouter", "Custom"],
@@ -846,7 +932,12 @@ def ask(role_text, user_text, images=(), pref="analysis", data_mode="NONE", nich
         "The owner's message may be dictated and contain speech-to-text mistakes; read for meaning. "
         "(Language rule again: reply in Urdu script unless the task asks for English product text; never Hindi or Devanagari.)"
     )
-    chain = order_providers(providers, PREFS[pref])
+    job = "chat" if role_text == CHAT_ROLE else next((ROLE_TO_FIELD[r] for r in ROLES if ROLES[r] == role_text), None)
+    prefs = list(PREFS[pref])
+    choice = ss.get(f"jobpref_{job}", "Auto") if job else "Auto"
+    if choice != "Auto":
+        prefs = [choice] + prefs
+    chain = order_providers(providers, prefs)
     text, sources, used, skipped = run_chain(chain, system, user_text, list(images), grounding, allow_paid)
     if used:
         key = used.split(" (")[0]
@@ -870,7 +961,7 @@ def show_run_info(used, skipped, data_mode, text):
     if skipped:
         with st.expander("Skipped providers and reasons", expanded=not text):
             for name, why in skipped:
-                st.write(f"- {name}: {why}")
+                st.write(f"- {name}: {with_hint(why)}")
 
 
 def get_images(uploads):
@@ -898,7 +989,7 @@ niche = top1.selectbox("Niche", NICHES, key="niche")
 market = top2.selectbox("Market", MARKETS, key="market")
 platform = top3.selectbox("Platform", PLATFORMS, key="platform")
 
-tabs = st.tabs(["1 Research", "2 Decide and SEO", "3 Content", "4 Images", "5 PDF and ZIP", "Project"])
+tabs = st.tabs(["1 Research", "2 Decide and SEO", "3 Content", "4 Images", "5 PDF and ZIP", "Project", "Chat"])
 
 # ----------------------------------------------------------- tab 1
 with tabs[0]:
@@ -907,8 +998,9 @@ with tabs[0]:
     role1 = st.radio("Job", TAB1_ROLES, key="role1")
     topic1 = st.text_input("Topic or product idea (optional)", key="topic1")
     use_tav = st.checkbox("Search the web with Tavily (uses 1 credit)", key="use_tav", value=bool(tavily_key))
+    proof_on = st.checkbox("Run a proof check with a second AI after the answer", value=True, key="proof_on")
     default_q = f"{niche[2:]} printable PDF {market} popular designs price"
-    query1 = st.text_input("Search query", value=default_q, key="q1")
+    query1 = st.text_input("Search query", value=default_q)
     ev1 = st.text_area("Evidence: paste links with dates, notes, results (optional)", key="ev1", height=120)
     imgs1 = st.file_uploader("Screenshots (Pinterest suggestions, trends, competitor listings; Gemini only, up to 3)",
                              type=["png", "jpg", "jpeg", "webp"], accept_multiple_files=True, key="img1")
@@ -941,8 +1033,19 @@ with tabs[0]:
             P[ROLE_TO_FIELD[role1]] = text
             P["web_results"] = web_results
             P["web_sources"] = sources
+            if proof_on and text:
+                with st.spinner("Proof check with a second AI..."):
+                    pc, pused, pskip = proof_check(text, ev1 + "\n" + web_block, used)
+                if pc:
+                    P["proof"] = pc
+                    st.info(f"Proof check by: {pused}")
+                else:
+                    st.warning("No second AI was available for the proof check.")
     if P.get(ROLE_TO_FIELD[role1]):
         show_result(ROLE_TO_FIELD[role1], "t1")
+        if P.get("proof"):
+            st.markdown("**Proof check (unsupported claims removed):**")
+            st.markdown(P["proof"])
         if P.get("web_results"):
             st.markdown("**Web results found (open and check the links):**")
             for r in P["web_results"]:
@@ -1109,6 +1212,7 @@ with tabs[4]:
                                              ins_text, ss["icons"], layout5)
                     ss["pdfs"][pp] = pdf
                 st.success("PDF is ready. Download it below.")
+                preview_pdf(ss["pdfs"])
             except ImportError:
                 st.error("The reportlab library is missing. Add 'reportlab' and 'Pillow' to requirements.txt.")
             except Exception as e:
@@ -1165,3 +1269,26 @@ with tabs[5]:
         if P.get(k):
             with st.expander(label):
                 st.markdown(P[k])
+
+
+# ----------------------------------------------------------- chat tab
+with tabs[6]:
+    st.subheader("Chat")
+    st.caption("عام سوال یا ہدایت۔ آخری 8 پیغام یاد رہتے ہیں۔ ہر جواب کے ساتھ لکھا آتا ہے کہ کس AI نے دیا۔")
+    if "chat_log" not in ss:
+        ss["chat_log"] = []
+    for m_ in ss["chat_log"]:
+        with st.chat_message(m_["role"]):
+            st.markdown(m_["content"])
+    msg = st.chat_input("کوئی سوال یا ہدایت لکھیں...")
+    if msg:
+        ss["chat_log"].append({"role": "user", "content": msg})
+        hist = "\n".join(f"{m_['role']}: {m_['content']}" for m_ in ss["chat_log"][-8:])
+        ctext, _, cused, cskip = ask(CHAT_ROLE, hist, (), "fast", "NONE", niche, market)
+        if ctext:
+            reply = ctext + f"\n\n_Answered by: {cused}_"
+        else:
+            reasons = "; ".join(f"{n_}: {w_}" for n_, w_ in cskip) or "no key entered"
+            reply = "All providers failed. Reasons: " + reasons
+        ss["chat_log"].append({"role": "assistant", "content": reply})
+        st.rerun()
