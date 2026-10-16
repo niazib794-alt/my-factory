@@ -140,7 +140,7 @@ def error_from_response(r, keys):
 
 
 def call_gemini(key, model, system, user_text, images, grounding):
-        if not model:
+    if not model:
         model = "gemini-3.8-flash"
     url = f"{GEMINI_URL}/models/{model}:generateContent"
     headers = {"x-goog-api-key": key, "Content-Type": "application/json"}
