@@ -4,6 +4,8 @@ Five systems: 1 Research, 2 Decide and SEO, 3 Content, 4 Images, 5 PDF and ZIP.
 Keys are typed in the sidebar (or kept in Streamlit secrets). Nothing is posted or uploaded for you.
 """
 import base64
+import os
+from concurrent.futures import ThreadPoolExecutor
 import io
 import json
 import math
@@ -37,7 +39,8 @@ st.markdown(
 # =====================================================================
 SHARED = """You help one owner (Bashir) run a small business selling printable PDFs for kids and families on Gumroad.
 LANGUAGE: Reply in Urdu script, simple short sentences. Never reply in Hindi or Devanagari script, even if the owner's message is in Devanagari (it is dictated Urdu). Keep keywords, titles and product text in English.
-NICHES (fixed): Autism-Friendly Visuals, ADHD Support Charts, Potty Training Schedule, Reward Chart Bundle, Pantry / Kitchen Labels. "Trend" always means digital-product and search trends in these niches and kids and family printables, never news, politics, sports or celebrities.
+NICHES (only these two, nothing else): 1) Routine + Reward Charts: children's daily routine charts, visual schedules, task checklists, habit trackers, star charts and reward charts (routine and reward are ONE niche). 2) ADHD Brain Dump Planner for Children: child-friendly brain dump worksheets, thought organizers, task-capture sheets, focus-support planners and simple planning printables. Never add or suggest any other niche. "Trend" means digital-product and search trends in these two niches only, never news, politics, sports or celebrities.
+RESEARCH FIRST: research and evidence must come before any product creation. If there is no evidence, say so and stop before making product text. When making a business decision, compare the two niches.
 HONESTY: Mark every claim as SOURCE (with link and date), OWNER INPUT (text or screenshot the owner gave you) or GUESS (an idea without evidence). Never invent numbers, prices, search volumes, rankings or sales. If you do not know, say so and ask for a screenshot. Never promise ranking, reach, views or sales. A listing existing is not proof that it sells. If data_mode is NONE you have no current data: never say "trending now" or "current demand"; give a watchlist labelled GUESS and ask for screenshots.
 SAFE WORDING: Never write medical, diagnosis, treatment, cure or guaranteed-result claims (never "treats ADHD", "fixes autism", "guaranteed focus", "potty trained in 3 days"). Use support wording: "supports routines", "helps organise the day", "visual steps". Do not use names of registered programs or brands.
 ORIGINALITY: Original work only. Never copy competitors, characters, logos, brands or trademarks.
@@ -45,15 +48,15 @@ OWNER CONTROL: The owner uploads and posts himself. You only prepare drafts. Nev
 STYLE: Answer first, short, then details. Ask at most one question."""
 
 ROLES = {
-    "Research (keywords and market)": """ROLE: Market researcher. For the niche and market given, report: 1) popular designs and formats (describe, do not copy), 2) gaps and common buyer complaints, 3) price range seen (currency, source, date for each), 4) buyer phrases, 5) three product opportunities with evidence and risk. Give short-tail and long-tail keywords only if they appear in the evidence; mark the rest GUESS. Every point needs a link and date when web sources exist.""",
-    "Trend and Gap (Top 5)": """ROLE: Trend analyst. Default scope: kids and family printable products. From the evidence given, name the Top 5 trends (fewer if evidence is thin) and compare all five core niches against them (in Top 5 or not; never force a niche in). Say whether each trend is rising, stable, declining or unclear and why. Add the gap for each (what is missing). Without evidence give only a GUESS watchlist and ask for screenshots.""",
-    "Strategy and Price": """ROLE: Strategist. From the evidence given: 1) choose ONE product to make first and why, 2) target buyer and age, 3) 1 primary and 5 long-tail keywords (GUESS if not in the evidence), 4) three price options (entry, standard, bundle) in USD, GBP, EUR and AUD based on observed competitor prices if given, otherwise GUESS, 5) estimated net per sale assuming Gumroad takes 10 percent plus 0.50 USD per direct sale (tell the owner to verify the current fees), 6) a small test plan: 5 pins and 1 Reel, wait 7 days, record saves, clicks and sales. If competitor listing screenshots are attached, read the visible prices and currencies and show lowest, middle and highest.""",
-    "SEO and Listing": """ROLE: Listing writer for Gumroad. Write: 3 clear title options (main keyword first, no clickbait), a description (first 2 lines with the main keyword and the benefit; then what is included, sizes US Letter and A4, how to use in 3 steps, who it is for, printing tips, short FAQ), and a keyword list (primary, secondary, long-tail). It is a digital download; nothing is shipped. Keywords only from the evidence; mark the rest GUESS.""",
+    "Research (keywords and market)": """ROLE: Market researcher. Research only the two approved niches. For the niche and market given, report: 1) popular designs and formats (describe, do not copy), 2) gaps and common buyer complaints, 3) price range seen (currency, source, date for each), 4) buyer phrases, 5) three product opportunities with evidence and risk. Give short-tail and long-tail keywords only if they appear in the evidence; mark the rest GUESS. Every point needs a link and date when web sources exist. Focus on what buyers are LOOKING FOR and cannot find a good product for: list each gap as (buyer search or need, evidence, weakness of existing products), and say "no gap found" if the evidence does not show one.""",
+    "Trend and Gap (Top 5)": """ROLE: Trend analyst. Default scope: only the two approved niches (Routine + Reward Charts, ADHD Brain Dump Planner for Children). From the evidence given, name the Top 5 trends (fewer if evidence is thin) and compare both approved niches against them (in Top 5 or not; never force a niche in). Say whether each trend is rising, stable, declining or unclear and why. Add the gap for each (what is missing). Without evidence give only a GUESS watchlist and ask for screenshots.""",
+    "Strategy and Price": """ROLE: Strategist. Compare the two approved niches with the evidence and say which one is stronger, and why. From the evidence given: 1) choose ONE product to make first and why, 2) target buyer and age, 3) 1 primary and 5 long-tail keywords (GUESS if not in the evidence), 4) three price options (entry, standard, bundle) in USD, GBP, EUR and AUD based on observed competitor prices if given, otherwise GUESS, 5) estimated net per sale assuming Gumroad takes 10 percent plus 0.50 USD per direct sale (tell the owner to verify the current fees), 6) a small test plan: 5 pins and 1 Reel, wait 7 days, record saves, clicks and sales. If competitor listing screenshots are attached, read the visible prices and currencies and show lowest, middle and highest.""",
+    "SEO and Listing": """ROLE: Listing writer for Gumroad. Write: 3 clear title options (main keyword first, no clickbait), a description (first 2 lines with the main keyword and the benefit; then what is included, sizes US Letter and A4, how to use in 3 steps, who it is for, printing tips, short FAQ), and a keyword list (primary, secondary, long-tail). It is a digital download; nothing is shipped. Keywords only from the evidence; mark the rest GUESS. At the end, add a section titled "ثبوت (اردو)" in Urdu: for each keyword (primary, short-tail, long-tail) say where it came from (SOURCE, OWNER INPUT or GUESS), why a buyer would type it, and whether the listing text uses it honestly. Add a safe-wording check line.""",
     "QC (check before publishing)": """ROLE: Quality checker. Check the text given and answer PASS, FIX or BLOCK. Check: 1) safe wording (list each risky phrase and a safe replacement), 2) every claim: supported or not, 3) originality (copying, characters, brands, registered program names), 4) print (sizes, margins, readability), 5) title, description and files match the real product, 6) typos. Remind the owner to check the current rules of Gumroad and the social platforms for children's and health-related products.""",
     "Product spec": """ROLE: Product writer. Write a page-by-page specification: product name, buyer, age range, file list, and for each page: title, exact on-page text, layout notes (grid, boxes, rows), icon slots. Two paper versions: US Letter (USA, Canada) and A4 (UK, Australia, Europe). 15 mm margin on all sides and a logo zone 5 to 10 mm tall inside the bottom margin. Add a short parent instructions page, calm uncluttered design, and a design brief (colour hex codes, free fonts, icon style).""",
     "Pins and Social": """ROLE: Social content writer. Write: 5 Pinterest pins (title with the main keyword early, description, text on the image, alt text, board name; size 1000 x 1500; one topic per pin), 2 Reels scripts of 5 to 10 seconds (spoken hook in the first 3 seconds, on-screen text, caption), 1 helpful Facebook parent-group post (a tip or question first, not spam), and a 7-day posting plan for one person. Platform tips are working ideas, not rules or promises.""",
 }
-CHAT_ROLE = """ROLE: Business assistant for the owner. Answer his question directly and briefly. For trends or prices, say clearly what is evidence and what is a guess. Stay with the five niches and printable products. Never invent data."""
+CHAT_ROLE = """ROLE: Business assistant for the owner. Answer his question directly and briefly. For trends or prices, say clearly what is evidence and what is a guess. Stay with the two approved niches and printable products. Never invent data."""
 PROOF_ROLE = """ROLE: Proof checker. You get a DRAFT and the EVIDENCE it was based on. Keep only the claims that the evidence supports, or that are clearly marked GUESS. Remove invented numbers, prices, rankings, sales claims, and medical or guaranteed-result wording. Reply with: 1) CLEAN TEXT (the corrected draft), 2) REMOVED (each removed claim and why). Urdu script for explanations, English for product text."""
 TAB1_ROLES = ["Research (keywords and market)", "Trend and Gap (Top 5)"]
 TAB2_ROLES = ["Strategy and Price", "SEO and Listing", "QC (check before publishing)"]
@@ -69,42 +72,36 @@ ROLE_TO_FIELD = {
 }
 
 NICHES = [
-    "1 Autism-Friendly Visuals",
-    "2 ADHD Support Charts",
-    "3 Potty Training Schedule",
-    "4 Reward Chart Bundle",
-    "5 Pantry / Kitchen Labels",
+    "1 Routine + Reward Charts",
+    "2 ADHD Brain Dump Planner for Children",
 ]
 MARKETS = ["USA", "UK", "Canada", "Australia", "Europe"]
 PLATFORMS = ["Pinterest", "Instagram", "TikTok", "YouTube", "Facebook", "Google"]
 
 TEMPLATES = {
     "weekly_chart": "Reward chart (weekly)",
-    "routine_chart": "Routine / task chart (ADHD support)",
-    "potty_schedule": "Potty schedule tracker",
+    "routine_chart": "Routine / task chart",
+    "potty_schedule": "Schedule tracker",
     "cards": "Visual cards (up to 48)",
-    "labels": "Pantry / kitchen labels",
+    "labels": "Label sheet",
 }
 NICHE_TEMPLATE = {
-    NICHES[0]: "cards",
-    NICHES[1]: "routine_chart",
-    NICHES[2]: "potty_schedule",
-    NICHES[3]: "weekly_chart",
-    NICHES[4]: "labels",
+    NICHES[0]: "routine_chart",
+    NICHES[1]: "cards",
 }
 JSON_SPECS = {
     "weekly_chart": '{"title": "My Reward Chart", "tasks": ["Make my bed", "Brush my teeth"], "reward": "Pick a family activity"} with up to 10 short tasks',
     "routine_chart": '{"title": "My Daily Routine", "tasks": [{"time": "7:00", "task": "Wake up"}, {"time": "7:15", "task": "Get dressed"}]} with up to 10 tasks in time order',
-    "potty_schedule": '{"title": "Potty Schedule", "times": ["7:00", "9:00", "11:00"]} with up to 10 times',
+    "potty_schedule": '{"title": "Daily Schedule", "times": ["7:00", "9:00", "11:00"]} with up to 10 times',
     "cards": '{"title": "Morning Routine Cards", "cards": [{"label": "Wake up"}, {"label": "Brush teeth"}]} with the requested number of cards, each label 1 to 4 words',
-    "labels": '{"title": "Pantry Labels", "labels": ["Flour", "Sugar", "Rice"]} with the requested number of labels, each 1 to 3 words',
+    "labels": '{"title": "Label Sheet", "labels": ["Flour", "Sugar", "Rice"]} with the requested number of labels, each 1 to 3 words',
 }
 DEFAULT_JSON = {
     "weekly_chart": {"title": "My Reward Chart", "tasks": ["Make my bed", "Brush my teeth", "Put toys away", "Help set the table", "Read a book"], "reward": "Pick a family activity"},
     "routine_chart": {"title": "My Daily Routine", "tasks": [{"time": "7:00", "task": "Wake up"}, {"time": "7:15", "task": "Get dressed"}, {"time": "7:30", "task": "Eat breakfast"}, {"time": "8:00", "task": "Brush teeth"}]},
-    "potty_schedule": {"title": "Potty Schedule", "times": ["7:00", "9:00", "11:00", "13:00", "15:00", "17:00", "19:00"]},
+    "potty_schedule": {"title": "Daily Schedule", "times": ["7:00", "9:00", "11:00", "13:00", "15:00", "17:00", "19:00"]},
     "cards": {"title": "Morning Routine Cards", "cards": [{"label": "Wake up"}, {"label": "Go to the toilet"}, {"label": "Wash hands"}, {"label": "Get dressed"}, {"label": "Eat breakfast"}, {"label": "Brush teeth"}]},
-    "labels": {"title": "Pantry Labels", "labels": ["Flour", "Sugar", "Rice", "Pasta", "Oats", "Salt", "Tea", "Coffee"]},
+    "labels": {"title": "Label Sheet", "labels": ["Flour", "Sugar", "Rice", "Pasta", "Oats", "Salt", "Tea", "Coffee"]},
 }
 DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta"
@@ -139,9 +136,35 @@ def error_from_response(r, keys):
     return f"HTTP {r.status_code}: {mask(msg, keys)}"
 
 
+RETRY_BASE = 2.0      # seconds; doubles on each retry
+RETRY_TRIES = 4       # total attempts per request
+RETRY_STATUS = {429, 500, 502, 503, 504}
+
+
+def post_with_retry(url, **kwargs):
+    """POST with exponential backoff for rate limits (429), server errors and network timeouts."""
+    r = None
+    for attempt in range(RETRY_TRIES):
+        last = attempt == RETRY_TRIES - 1
+        try:
+            r = requests.post(url, **kwargs)
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
+            if last:
+                raise
+            time.sleep(RETRY_BASE * (2 ** attempt) + random.uniform(0, 0.5))
+            continue
+        if r.status_code in RETRY_STATUS and not last:
+            try:
+                wait = float(r.headers.get("Retry-After", ""))
+            except Exception:
+                wait = RETRY_BASE * (2 ** attempt) + random.uniform(0, 0.5)
+            time.sleep(min(wait, 30))
+            continue
+        return r
+    return r
+
+
 def call_gemini(key, model, system, user_text, images, grounding):
-    if not model:
-        model = "gemini-3.8-flash"
     url = f"{GEMINI_URL}/models/{model}:generateContent"
     headers = {"x-goog-api-key": key, "Content-Type": "application/json"}
     parts = [{"text": user_text}]
@@ -153,7 +176,7 @@ def call_gemini(key, model, system, user_text, images, grounding):
     }
     if grounding:
         body["tools"] = [{"google_search": {}}]
-    r = requests.post(url, headers=headers, json=body, timeout=120)
+    r = post_with_retry(url, headers=headers, json=body, timeout=120)
     if r.status_code != 200:
         raise ProviderError(error_from_response(r, [key]))
     data = r.json()
@@ -185,7 +208,7 @@ def call_openai_compatible(base_url, key, model, system, user_text):
             {"role": "user", "content": user_text},
         ],
     }
-    r = requests.post(url, headers=headers, json=body, timeout=120)
+    r = post_with_retry(url, headers=headers, json=body, timeout=120)
     if r.status_code != 200:
         raise ProviderError(error_from_response(r, [key]))
     try:
@@ -284,12 +307,12 @@ def order_providers(providers, prefs):
 def tavily_search(key, query, max_results=8):
     url = "https://api.tavily.com/search"
     body = {"query": query, "search_depth": "basic", "max_results": max_results}
-    r = requests.post(url, headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+    r = post_with_retry(url, headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
                       json=body, timeout=60)
     if r.status_code in (401, 403):
         body2 = dict(body)
         body2["api_key"] = key
-        r = requests.post(url, json=body2, timeout=60)
+        r = post_with_retry(url, json=body2, timeout=60)
     if r.status_code != 200:
         raise ProviderError(error_from_response(r, [key]))
     results = r.json().get("results", [])
@@ -306,7 +329,102 @@ def pollinations_image(prompt, width, height):
     return r.content
 
 
+def extract_json_block(text):
+    """Return the first balanced JSON object in a reply (handles code fences and quoted braces), else None."""
+    if not text:
+        return None
+    t = re.sub(r"^```[a-zA-Z]*\s*", "", str(text).strip())
+    t = re.sub(r"\s*```\s*$", "", t)
+    start = t.find("{")
+    if start == -1:
+        return None
+    depth, in_str, esc = 0, False, False
+    for i in range(start, len(t)):
+        ch = t[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    return json.loads(t[start:i + 1])
+                except Exception:
+                    return None
+    return None
+
+
+LIMITS = {"tasks": 12, "times": 12, "cards": 12, "labels": 24}
+
+
+def validate_content(template, data):
+    """Check the shape one sheet needs. Returns (ok, message)."""
+    if not isinstance(data, dict):
+        return False, "content must be a JSON object"
+    if template not in TEMPLATES:
+        return False, f"unknown template {template}"
+    if not isinstance(data.get("title", ""), str):
+        return False, "title must be text"
+    if template == "weekly_chart":
+        items = data.get("tasks", [])
+        if not isinstance(items, list) or not all(isinstance(x, str) for x in items):
+            return False, "tasks must be a list of text"
+        if len(items) > LIMITS["tasks"]:
+            return False, f"at most {LIMITS['tasks']} tasks"
+    elif template == "routine_chart":
+        items = data.get("tasks", [])
+        if not isinstance(items, list) or not all(isinstance(x, dict) for x in items):
+            return False, "tasks must be a list of objects with time and task"
+        if len(items) > LIMITS["tasks"]:
+            return False, f"at most {LIMITS['tasks']} tasks"
+    elif template == "potty_schedule":
+        items = data.get("times", [])
+        if not isinstance(items, list) or not all(isinstance(x, str) for x in items):
+            return False, "times must be a list of text"
+        if len(items) > LIMITS["times"]:
+            return False, f"at most {LIMITS['times']} times"
+    elif template == "cards":
+        items = data.get("cards", [])
+        if not isinstance(items, list) or not all(isinstance(x, dict) and isinstance(x.get("label", ""), str) for x in items):
+            return False, "cards must be a list of objects with a text label"
+        if len(items) > LIMITS["cards"]:
+            return False, f"at most {LIMITS['cards']} cards"
+    elif template == "labels":
+        items = data.get("labels", [])
+        if not isinstance(items, list) or not all(isinstance(x, str) for x in items):
+            return False, "labels must be a list of text"
+        if len(items) > LIMITS["labels"]:
+            return False, f"at most {LIMITS['labels']} labels"
+    return True, "ok"
+
+
+def validate_bundle(data):
+    """Check the Auto bundle: {"sheets": [{"template": ..., "data": {...}}, ...]}."""
+    if not isinstance(data, dict) or not isinstance(data.get("sheets"), list) or not data["sheets"]:
+        return False, 'top level must be {"sheets": [ ... ]} with at least one sheet'
+    for i, sh in enumerate(data["sheets"], 1):
+        if not isinstance(sh, dict):
+            return False, f"sheet {i} is not an object"
+        ok, msg = validate_content(sh.get("template"), sh.get("data"))
+        if not ok:
+            return False, f"sheet {i}: {msg}"
+    return True, "ok"
+
+
 def extract_json(text):
+    return extract_json_block(text)
+
+
+def _old_extract_json(text):
     """Find the first JSON object in a model reply."""
     if not text:
         return None
@@ -330,7 +448,39 @@ def clean(t):
     for a, b in {"\u2019": "'", "\u2018": "'", "\u201c": '"', "\u201d": '"', "\u2013": "-", "\u2014": "-",
                  "\u2026": "...", "\u2022": "-"}.items():
         t = t.replace(a, b)
+    if UNICODE_TEXT:
+        return t
     return t.encode("latin-1", "replace").decode("latin-1")
+
+
+FONT_R, FONT_B = "Helvetica", "Helvetica-Bold"
+UNICODE_TEXT = False
+
+
+def ensure_fonts():
+    """Register DejaVu (or Noto) from the fonts folder so any Unicode text prints; otherwise keep Helvetica."""
+    global FONT_R, FONT_B, UNICODE_TEXT
+    if UNICODE_TEXT:
+        return
+    try:
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+    except Exception:
+        return
+    here = os.path.dirname(os.path.abspath(globals().get("__file__") or "app.py"))
+    pairs = [
+        (os.path.join(here, "fonts", "DejaVuSans.ttf"), os.path.join(here, "fonts", "DejaVuSans-Bold.ttf")),
+        (os.path.join(here, "fonts", "NotoSans-Regular.ttf"), os.path.join(here, "fonts", "NotoSans-Bold.ttf")),
+    ]
+    for reg, bold in pairs:
+        if os.path.exists(reg) and os.path.exists(bold):
+            try:
+                pdfmetrics.registerFont(TTFont("AppSans", reg))
+                pdfmetrics.registerFont(TTFont("AppSans-Bold", bold))
+                FONT_R, FONT_B, UNICODE_TEXT = "AppSans", "AppSans-Bold", True
+                return
+            except Exception:
+                continue
 
 
 def _rl():
@@ -384,9 +534,9 @@ def star_path(c, cx, cy, r):
 def page_header(R, c, W, H, title, accent, margin, size=24):
     mm = R["mm"]
     t = clean(title)
-    s = fit_size(R, t, "Helvetica-Bold", W - 2 * margin, size, 12)
+    s = fit_size(R, t, FONT_B, W - 2 * margin, size, 12)
     c.setFillColor(accent)
-    c.setFont("Helvetica-Bold", s)
+    c.setFont(FONT_B, s)
     c.drawCentredString(W / 2, H - margin - 9 * mm, t)
     return H - margin - 15 * mm
 
@@ -420,7 +570,7 @@ def tpl_weekly(R, c, W, H, d, accent, light, margin):
     tasks = [clean(t) for t in d.get("tasks", [])][:12] or ["Task 1"]
     y = page_header(R, c, W, H, d.get("title", "My Reward Chart"), accent, margin)
     c.setFillColor(black)
-    c.setFont("Helvetica", 11)
+    c.setFont(FONT_R, 11)
     c.drawString(margin, y - 6 * mm, "Name: ______________________")
     c.drawRightString(W - margin, y - 6 * mm, "Week of: ______________")
     top = y - 12 * mm
@@ -435,7 +585,7 @@ def tpl_weekly(R, c, W, H, d, accent, light, margin):
     c.setFillColor(accent)
     c.rect(left, top - head_h, total_w, head_h, fill=1, stroke=0)
     c.setFillColor(white)
-    c.setFont("Helvetica-Bold", 10)
+    c.setFont(FONT_B, 10)
     c.drawString(left + 3 * mm, top - head_h + 3 * mm, "My tasks")
     for i, day in enumerate(DAYS + ["Total"]):
         c.drawCentredString(left + task_w + day_w * (i + 0.5), top - head_h + 3 * mm, day)
@@ -445,8 +595,8 @@ def tpl_weekly(R, c, W, H, d, accent, light, margin):
             c.setFillColor(light)
             c.rect(left, y0, total_w, row_h, fill=1, stroke=0)
         c.setFillColor(black)
-        sz = fit_size(R, t, "Helvetica", task_w - 6 * mm, 11, 7)
-        c.setFont("Helvetica", sz)
+        sz = fit_size(R, t, FONT_R, task_w - 6 * mm, 11, 7)
+        c.setFont(FONT_R, sz)
         c.drawString(left + 3 * mm, y0 + row_h / 2 - sz / 3, t)
         c.setStrokeColor(accent)
         c.setLineWidth(0.8)
@@ -463,21 +613,21 @@ def tpl_weekly(R, c, W, H, d, accent, light, margin):
     # reward and signature
     c.roundRect(left, margin, total_w * 0.62, reward_h, 4 * mm, stroke=1, fill=0)
     c.setFillColor(accent)
-    c.setFont("Helvetica-Bold", 12)
+    c.setFont(FONT_B, 12)
     c.drawString(left + 4 * mm, margin + reward_h - 8 * mm, "My reward:")
     c.setFillColor(black)
-    c.setFont("Helvetica", 11)
+    c.setFont(FONT_R, 11)
     yy = margin + reward_h - 15 * mm
-    for ln in wrap_text(R, d.get("reward", ""), "Helvetica", 11, total_w * 0.62 - 8 * mm)[:3]:
+    for ln in wrap_text(R, d.get("reward", ""), FONT_R, 11, total_w * 0.62 - 8 * mm)[:3]:
         c.drawString(left + 4 * mm, yy, ln)
         yy -= 5 * mm
     bx = left + total_w * 0.66
     c.roundRect(bx, margin, total_w * 0.34, reward_h * 0.55, 4 * mm, stroke=1, fill=0)
     c.setFillColor(accent)
-    c.setFont("Helvetica-Bold", 11)
+    c.setFont(FONT_B, 11)
     c.drawString(bx + 4 * mm, margin + reward_h * 0.55 - 8 * mm, "Total stars:")
     c.setFillColor(black)
-    c.setFont("Helvetica", 9)
+    c.setFont(FONT_R, 9)
     c.drawString(bx, margin + reward_h * 0.55 + 4 * mm, "Parent signature: ________________")
 
 
@@ -492,7 +642,7 @@ def tpl_routine(R, c, W, H, d, accent, light, margin):
     rows = rows or [("7:00", "Wake up")]
     y = page_header(R, c, W, H, d.get("title", "My Daily Routine"), accent, margin)
     c.setFillColor(black)
-    c.setFont("Helvetica", 11)
+    c.setFont(FONT_R, 11)
     c.drawString(margin, y - 6 * mm, "Name: ______________________")
     c.drawRightString(W - margin, y - 6 * mm, "Date: ______________")
     top = y - 12 * mm
@@ -507,7 +657,7 @@ def tpl_routine(R, c, W, H, d, accent, light, margin):
     c.setFillColor(accent)
     c.rect(left, top - head_h, total_w, head_h, fill=1, stroke=0)
     c.setFillColor(white)
-    c.setFont("Helvetica-Bold", 10)
+    c.setFont(FONT_B, 10)
     c.drawString(left + 3 * mm, top - head_h + 3 * mm, "Time")
     c.drawString(left + time_w + 3 * mm, top - head_h + 3 * mm, "What to do")
     c.drawCentredString(left + time_w + task_w + done_w / 2, top - head_h + 3 * mm, "Done")
@@ -517,10 +667,10 @@ def tpl_routine(R, c, W, H, d, accent, light, margin):
             c.setFillColor(light)
             c.rect(left, y0, total_w, row_h, fill=1, stroke=0)
         c.setFillColor(black)
-        c.setFont("Helvetica", 11)
+        c.setFont(FONT_R, 11)
         c.drawString(left + 3 * mm, y0 + row_h / 2 - 1.5 * mm, tm)
-        sz = fit_size(R, tk, "Helvetica-Bold", task_w - 6 * mm, 12, 7)
-        c.setFont("Helvetica-Bold", sz)
+        sz = fit_size(R, tk, FONT_B, task_w - 6 * mm, 12, 7)
+        c.setFont(FONT_B, sz)
         c.drawString(left + time_w + 3 * mm, y0 + row_h / 2 - 1.5 * mm, tk)
         c.setStrokeColor(accent)
         c.setLineWidth(1)
@@ -531,7 +681,7 @@ def tpl_routine(R, c, W, H, d, accent, light, margin):
     c.rect(left, top - head_h - n * row_h, total_w, head_h + n * row_h, stroke=1, fill=0)
     c.roundRect(left, margin, total_w, box_h, 4 * mm, stroke=1, fill=0)
     c.setFillColor(accent)
-    c.setFont("Helvetica-Bold", 12)
+    c.setFont(FONT_B, 12)
     c.drawString(left + 4 * mm, margin + box_h - 8 * mm, "Today's top 3:")
     c.setStrokeColor(black)
     c.setLineWidth(0.4)
@@ -543,9 +693,9 @@ def tpl_routine(R, c, W, H, d, accent, light, margin):
 def tpl_potty(R, c, W, H, d, accent, light, margin):
     mm, black, white = R["mm"], R["black"], R["white"]
     times = [clean(t) for t in d.get("times", [])][:12] or ["7:00"]
-    y = page_header(R, c, W, H, d.get("title", "Potty Schedule"), accent, margin)
+    y = page_header(R, c, W, H, d.get("title", "Daily Schedule"), accent, margin)
     c.setFillColor(black)
-    c.setFont("Helvetica", 11)
+    c.setFont(FONT_R, 11)
     c.drawString(margin, y - 6 * mm, "Name: ______________________")
     c.drawRightString(W - margin, y - 6 * mm, "Week of: ______________")
     top = y - 12 * mm
@@ -560,7 +710,7 @@ def tpl_potty(R, c, W, H, d, accent, light, margin):
     c.setFillColor(accent)
     c.rect(left, top - head_h, total_w, head_h, fill=1, stroke=0)
     c.setFillColor(white)
-    c.setFont("Helvetica-Bold", 10)
+    c.setFont(FONT_B, 10)
     c.drawString(left + 3 * mm, top - head_h + 3 * mm, "Time")
     for i, day in enumerate(DAYS):
         c.drawCentredString(left + time_w + day_w * (i + 0.5), top - head_h + 3 * mm, day)
@@ -570,7 +720,7 @@ def tpl_potty(R, c, W, H, d, accent, light, margin):
             c.setFillColor(light)
             c.rect(left, y0, total_w, row_h, fill=1, stroke=0)
         c.setFillColor(black)
-        c.setFont("Helvetica-Bold", 11)
+        c.setFont(FONT_B, 11)
         c.drawString(left + 3 * mm, y0 + row_h / 2 - 1.5 * mm, tm)
         c.setStrokeColor(accent)
         c.setLineWidth(1)
@@ -586,7 +736,7 @@ def tpl_potty(R, c, W, H, d, accent, light, margin):
         c.line(x, top, x, top - head_h - n * row_h)
     c.roundRect(left, margin, total_w, notes_h, 4 * mm, stroke=1, fill=0)
     c.setFillColor(accent)
-    c.setFont("Helvetica-Bold", 12)
+    c.setFont(FONT_B, 12)
     c.drawString(left + 4 * mm, margin + notes_h - 8 * mm, "Notes:")
     c.setStrokeColor(black)
     c.setLineWidth(0.4)
@@ -594,7 +744,7 @@ def tpl_potty(R, c, W, H, d, accent, light, margin):
         yy = margin + notes_h - 15 * mm - i * 7 * mm
         c.line(left + 6 * mm, yy, left + total_w - 6 * mm, yy)
     c.setFillColor(black)
-    c.setFont("Helvetica", 8)
+    c.setFont(FONT_R, 8)
     c.drawString(left, margin + notes_h + 2 * mm, "A tracking sheet for parents. Every child is different.")
 
 
@@ -622,7 +772,7 @@ def tpl_cards(R, c, W, H, d, accent, light, margin, logo_args, icons, new_page):
             c.setFillColor(accent)
             c.circle(x + 8 * mm, y0 + ch - 8 * mm, 5 * mm, stroke=0, fill=1)
             c.setFillColor(white)
-            c.setFont("Helvetica-Bold", 10)
+            c.setFont(FONT_B, 10)
             c.drawCentredString(x + 8 * mm, y0 + ch - 9.6 * mm, str(start + i + 1))
             side = min(cw - 12 * mm, ch - 32 * mm)
             ix, iy = x + (cw - side) / 2, y0 + 20 * mm
@@ -637,11 +787,11 @@ def tpl_cards(R, c, W, H, d, accent, light, margin, logo_args, icons, new_page):
                 c.circle(x + cw / 2, iy + side / 2, side / 2, stroke=0, fill=1)
             c.setFillColor(black)
             size = 15
-            lines = wrap_text(R, lab, "Helvetica-Bold", size, cw - 8 * mm)
+            lines = wrap_text(R, lab, FONT_B, size, cw - 8 * mm)
             while len(lines) > 2 and size > 8:
                 size -= 1
-                lines = wrap_text(R, lab, "Helvetica-Bold", size, cw - 8 * mm)
-            c.setFont("Helvetica-Bold", size)
+                lines = wrap_text(R, lab, FONT_B, size, cw - 8 * mm)
+            c.setFont(FONT_B, size)
             ly = y0 + 11 * mm + (len(lines) - 1) * size * 0.4
             for ln in lines[:2]:
                 c.drawCentredString(x + cw / 2, ly, ln)
@@ -673,9 +823,9 @@ def tpl_labels(R, c, W, H, d, accent, light, margin, logo_args, new_page, layout
             c.setStrokeColor(accent)
             c.setLineWidth(1.2)
             c.roundRect(x, y0, lw, lh, 3 * mm, stroke=1, fill=0)
-            size = fit_size(R, lab, "Helvetica-Bold", lw - 6 * mm, min(22, lh * 0.45 / mm * 2.2), 7)
+            size = fit_size(R, lab, FONT_B, lw - 6 * mm, min(22, lh * 0.45 / mm * 2.2), 7)
             c.setFillColor(black)
-            c.setFont("Helvetica-Bold", size)
+            c.setFont(FONT_B, size)
             c.drawCentredString(x + lw / 2, y0 + lh / 2 - size / 3, lab)
         logo_args()
 
@@ -684,6 +834,7 @@ def build_pdf(template, data, paper, accent_hex, bw, brand, logo_bytes, logo_h_m
               instructions, icons, label_layout):
     """Return PDF bytes. paper is 'US Letter' or 'A4'."""
     R = _rl()
+    ensure_fonts()
     mm = R["mm"]
     size = R["letter"] if paper == "US Letter" else R["A4"]
     W, H = size
@@ -725,10 +876,10 @@ def build_pdf(template, data, paper, accent_hex, bw, brand, logo_bytes, logo_h_m
         c.showPage()
         y = page_header(R, c, W, H, "How to use", accent, margin, 22)
         c.setFillColor(R["black"])
-        c.setFont("Helvetica", 12)
+        c.setFont(FONT_R, 12)
         y -= 6 * mm
         for para in instructions.split("\n"):
-            for ln in wrap_text(R, para, "Helvetica", 12, W - 2 * margin) or [""]:
+            for ln in wrap_text(R, para, FONT_R, 12, W - 2 * margin) or [""]:
                 c.drawString(margin, y, ln)
                 y -= 6.5 * mm
             y -= 2 * mm
@@ -784,6 +935,13 @@ def secret(name):
         return ""
 
 
+def sec_int(name, default):
+    try:
+        return int(str(secret(name)).strip())
+    except Exception:
+        return default
+
+
 ss = st.session_state
 ss.setdefault("project", {})
 ss.setdefault("counts", {})
@@ -799,7 +957,7 @@ st.sidebar.caption("Keys stay only in this browser session unless you save them 
 
 providers = []
 with st.sidebar.expander("1. Google Gemini", expanded=True):
-    gem_model = st.text_input("Gemini model name", value="gemini-2.5-flash", key="gemm",
+    gem_model = st.text_input("Gemini model name", value=secret("GEMINI_MODEL") or "gemini-3.8-flash", key="gemm",
                               help="If you get 'model not found', press 'Show models' and copy a name from the list.")
     for i in (1, 2, 3):
         k = st.text_input(f"Gemini key {i}", type="password", key=f"gk{i}", value=secret(f"GEMINI_KEY_{i}"))
@@ -809,13 +967,13 @@ with st.sidebar.expander("1. Google Gemini", expanded=True):
 
 with st.sidebar.expander("2. Groq (free tier, fast)"):
     k = st.text_input("Groq key", type="password", key="grk", value=secret("GROQ_KEY"))
-    m = st.text_input("Groq model name", value="llama-3.3-70b-versatile", key="grm")
+    m = st.text_input("Groq model name", value=secret("GROQ_MODEL") or "llama-3.3-70b-versatile", key="grm")
     providers.append({"name": "Groq", "type": "openai", "key": k.strip(), "model": m.strip(),
                       "base": "https://api.groq.com/openai/v1", "paid": False})
 
 with st.sidebar.expander("3. OpenRouter (free models, small daily limit)"):
     k = st.text_input("OpenRouter key", type="password", key="ork", value=secret("OPENROUTER_KEY"))
-    m = st.text_input("OpenRouter model (you choose; some cost money)", key="orm")
+    m = st.text_input("OpenRouter model (you choose; some cost money)", value=secret("OPENROUTER_MODEL"), key="orm")
     providers.append({"name": "OpenRouter", "type": "openai", "key": k.strip(), "model": m.strip(),
                       "base": "https://openrouter.ai/api/v1", "paid": False})
 
@@ -828,14 +986,27 @@ with st.sidebar.expander("4. Custom provider (Perplexity, OpenAI, Grok...)"):
     providers.append({"name": "Custom " + cname.strip(), "type": "openai", "key": k.strip(), "model": m.strip(),
                       "base": cbase.strip(), "paid": cpaid})
 
+for _n in (1, 2, 3, 4, 5):
+    _base = secret(f"CUSTOM{_n}_BASE")
+    _key = secret(f"CUSTOM{_n}_KEY")
+    if _base and _key:
+        providers.append({
+            "name": "Custom " + (secret(f"CUSTOM{_n}_NAME") or str(_n)),
+            "type": "openai",
+            "key": str(_key).strip(),
+            "model": str(secret(f"CUSTOM{_n}_MODEL") or "").strip(),
+            "base": str(_base).strip(),
+            "paid": str(secret(f"CUSTOM{_n}_PAID") or "true").strip().lower() == "true",
+        })
+
 with st.sidebar.expander("5. Tavily (web search)"):
     tavily_key = st.text_input("Tavily key", type="password", key="tvk", value=secret("TAVILY_KEY")).strip()
     st.caption("Free plan: about 1,000 credits a month. One basic search uses 1 credit.")
 
 with st.sidebar.expander("6. Brand and logo"):
-    brand = st.text_input("Brand name", value="Nurture Grid Co.", key="brand")
+    brand = st.text_input("Brand name", value=secret("BRAND_NAME") or "Nurture Grid Co.", key="brand")
     logo_up = st.file_uploader("Logo file (your own, used as it is)", type=["png", "jpg", "jpeg"], key="logo")
-    logo_h = st.slider("Logo height (mm)", 5, 10, 8, key="logoh")
+    logo_h = st.slider("Logo height (mm)", 5, 10, min(10, max(5, sec_int("LOGO_HEIGHT_MM", 10))), key="logoh")
     logo_pos = st.radio("Logo position", ["center", "left", "right"], horizontal=True, key="logop")
     logo_bytes = logo_up.getvalue() if logo_up else None
     if logo_bytes is None and secret("LOGO_B64"):
@@ -927,6 +1098,8 @@ PREFS = {
 
 
 def ask(role_text, user_text, images=(), pref="analysis", data_mode="NONE", niche="", market="", grounding=False):
+    if niche not in NICHES:
+        niche = NICHES[0]
     system = (
         SHARED + "\n\n" + role_text + "\n\n"
         f"data_mode: {data_mode}\ndata_date: {date.today().isoformat()}\n"
@@ -982,6 +1155,34 @@ def load_example():
     ss["json_text"] = json.dumps(DEFAULT_JSON[t], indent=2)
 
 
+def experiment_report(csv_text):
+    """Turn the owner's own numbers into rates. Rows with fewer than 100 views are not judged."""
+    rows, problems = [], []
+    for n, line in enumerate((csv_text or "").strip().splitlines(), 1):
+        if not line.strip() or line.lower().startswith("date"):
+            continue
+        parts = [x.strip() for x in line.split(",")]
+        if len(parts) < 6:
+            problems.append(f"line {n}: needs date,product,views,saves,clicks,sales")
+            continue
+        try:
+            v, s, c, sa = [int(float(x or 0)) for x in parts[2:6]]
+        except ValueError:
+            problems.append(f"line {n}: views, saves, clicks and sales must be numbers")
+            continue
+        save_rate = s / v * 100 if v else 0.0
+        click_rate = c / v * 100 if v else 0.0
+        sale_rate = sa / c * 100 if c else 0.0
+        if v < 100:
+            verdict = "too few views to judge (our rule: at least 100)"
+        elif sa == 0:
+            verdict = "no sale yet: keep testing, do not change everything"
+        else:
+            verdict = "sales recorded: compare with the other rows"
+        rows.append(f"{parts[0]} | {parts[1]} | views {v} | save {save_rate:.1f}% | click {click_rate:.1f}% | sale per click {sale_rate:.1f}% | {verdict}")
+    return rows, problems
+
+
 # ----------------------------------------------------------- header
 st.title("Business Factory")
 st.caption("پانچ نظام: ریسرچ، فیصلہ اور SEO، مواد، تصویریں، PDF۔ پوسٹ اور اپ لوڈ آپ خود کریں گے۔")
@@ -991,7 +1192,7 @@ niche = top1.selectbox("Niche", NICHES, key="niche")
 market = top2.selectbox("Market", MARKETS, key="market")
 platform = top3.selectbox("Platform", PLATFORMS, key="platform")
 
-tabs = st.tabs(["1 Research", "2 Decide and SEO", "3 Content", "4 Images", "5 PDF and ZIP", "Project", "Chat"])
+tabs = st.tabs(["1 Research", "2 Decide and SEO", "3 Content", "4 Images", "5 PDF and ZIP", "Project", "Chat", "Auto"])
 
 # ----------------------------------------------------------- tab 1
 with tabs[0]:
@@ -1037,7 +1238,7 @@ with tabs[0]:
             P["web_sources"] = sources
             if proof_on and text:
                 with st.spinner("Proof check with a second AI..."):
-                    pc, pused, pskip = proof_check(text, ev1 + "\n" + web_block, used)
+                    pc, _, pused = proof_check(text, ev1 + "\n" + web_block, used)
                 if pc:
                     P["proof"] = pc
                     st.info(f"Proof check by: {pused}")
@@ -1130,12 +1331,13 @@ with tabs[2]:
                                                "NONE", niche, market)
         show_run_info(used, skipped, "NONE", text)
         data = extract_json(text) if text else None
-        if data:
+        ok_c, why_c = validate_content(tpl3, data) if data is not None else (False, "no JSON object found")
+        if data is not None and ok_c:
             ss["json_text"] = json.dumps(data, indent=2, ensure_ascii=False)
             ss["tpl5"] = tpl3
             st.success("Content is ready. Open tab 5 to build the PDF.")
         elif text:
-            st.warning("The reply was not valid JSON. Copy it into tab 5 and fix it by hand, or run again.")
+            st.warning(f"The reply was rejected: {why_c}. Copy it into tab 5 and fix it by hand, or run again.")
             ss["json_text"] = text
             ss["tpl5"] = tpl3
 
@@ -1252,6 +1454,16 @@ with tabs[5]:
     save["template"] = ss.get("tpl5", "")
     st.download_button("Save project (.json)", data=json.dumps(save, ensure_ascii=False, indent=2),
                        file_name="project.json", mime="application/json", key="saveproj")
+    st.divider()
+    st.markdown("**Results log (your own numbers from Pinterest and Gumroad)**")
+    st.caption("One line per post or product: date,product,views,saves,clicks,sales. Example: 2026-10-20,Routine bundle,150,4,9,1")
+    st.text_area("Results", key="exp_log", height=160)
+    if st.button("Calculate", key="exp_calc"):
+        rws, probs = experiment_report(ss.get("exp_log", ""))
+        for r_ in rws:
+            st.write(r_)
+        for p_ in probs:
+            st.warning(p_)
     up = st.file_uploader("Load a saved project", type=["json"], key="loadproj")
     if up is not None and st.button("Load it", key="loadbtn"):
         try:
@@ -1294,3 +1506,236 @@ with tabs[6]:
             reply = "All providers failed. Reasons: " + reasons
         ss["chat_log"].append({"role": "assistant", "content": reply})
         st.rerun()
+
+
+# =====================================================================
+# AUTO: one button runs the whole chain, then the owner reviews
+# =====================================================================
+AUTO_BUNDLE_ROLE = """ROLE: Bundle designer for printable products in ONLY two niches: Routine + Reward Charts, and ADHD Brain Dump Planner for Children. You get the decision and the listing. Return ONLY valid JSON, no other text, in exactly this shape: {"sheets": [{"template": "weekly_chart", "data": {...}}, ...]}. The number of sheets must equal the number asked. Use only these templates and data shapes: weekly_chart: {"title", "tasks": [up to 8 short strings], "reward": "short text"}; routine_chart: {"title", "tasks": [{"time": "7:00", "task": "..."}] up to 8}; potty_schedule: {"title", "times": [up to 8 time strings]}; cards: {"title", "cards": [{"label": "1 to 4 words"}] up to 12}; labels: {"title", "labels": [up to 16 short words]}. Make every sheet different in theme or wording. English text, no emojis, no brand or character names, safe wording only (no medical or guaranteed-result claims)."""
+
+
+def auto_ai(role_text, text, images, pref, market_name, niche_name, log):
+    out, sources, used, skipped = ask(role_text, text, images, pref,
+                                      "PARTIAL" if images else "NONE", niche_name, market_name)
+    if not out:
+        raise ProviderError("; ".join(f"{n_}: {w_}" for n_, w_ in skipped) or "no AI key entered")
+    log(f"ok: {used}")
+    return out, used
+
+
+CONSENSUS_ROLE = """ROLE: Research analyst. Answer the research question for the niche and market given. Give: buyer searches (short, long, question phrases), existing product types, what is missing (gaps), and a list of claims, each with SOURCE (a link or 'screenshot') or GUESS. Never invent numbers."""
+JUDGE_ROLE = """ROLE: Research judge. You get several independent answers from different AIs about the same niche. Reply in Urdu headings: 1) AGREED: claims at least two answers make, with a source or screenshot behind them. 2) WEAK: claims from only one answer, or with no source (keep them, marked WEAK). 3) CONFLICT: where answers disagree, show both. 4) GAP: product gaps that appear in at least two answers. 5) NEXT CHECK: the one thing the owner should verify first. Never add a fact that none of the answers gave."""
+
+
+def provider_call(p, system, user):
+    if p["type"] == "gemini":
+        return call_gemini(p["key"], p["model"], system, user, [], False)[0]
+    return call_openai_compatible(p["base"], p["key"], p["model"], system, user)[0]
+
+
+def consensus_pool():
+    seen, pool = set(), []
+    for p in order_providers([x for x in providers if x["key"] and x["model"]], PREFS["analysis"]):
+        if p["paid"] and not allow_paid:
+            continue
+        sig = (p["type"], p.get("base", ""), p["model"])
+        if sig in seen:
+            continue
+        seen.add(sig)
+        pool.append(p)
+    return pool[:6]
+
+
+def run_consensus(base, log):
+    pool = consensus_pool()
+    if not pool:
+        raise ProviderError("no AI key with a model name")
+    answers = []
+
+    def _one(p):
+        return provider_call(p, SHARED + "\n\n" + CONSENSUS_ROLE, base)
+
+    with ThreadPoolExecutor(max_workers=len(pool)) as ex:
+        futures = [(p, ex.submit(_one, p)) for p in pool]
+        for p, fut in futures:
+            try:
+                answers.append((p["name"], fut.result()))
+                log(f"answer ok: {p['name']} ({p['model']})")
+            except Exception as e:
+                log(f"answer skipped: {p['name']}: {mask(e, [p['key']])}")
+    if not answers:
+        raise ProviderError("no AI answered the research")
+    if len(answers) == 1:
+        log("only one AI answered, so no judge step")
+        return answers[0][1]
+    bundle = "\n\n".join(f"ANSWER FROM {n}:\n{a}" for n, a in answers)
+    jpref = str(secret("JUDGE") or "Gemini").strip()
+    judges = [p for p in pool if p["name"].startswith(jpref)] + [p for p in pool if not p["name"].startswith(jpref)]
+    for p in judges:
+        try:
+            log(f"judge: {p['name']}")
+            return provider_call(p, SHARED + "\n\n" + JUDGE_ROLE, bundle)
+        except Exception as e:
+            log(f"judge skipped: {p['name']}: {mask(e, [p['key']])}")
+    return "JUDGE FAILED. Raw answers below, check them by hand.\n\n" + bundle
+
+
+def auto_build_zip(A, include=None):
+    """Build the ZIP of all good sheets (include=None) or of the ticked ones."""
+    chosen = [sh for i, sh in enumerate(A["sheets"]) if sh.get("pdf") and (include is None or include.get(i, True))]
+    files = {sh["name"]: sh["pdf"] for sh in chosen}
+    files["listing.txt"] = A.get("seo", "")
+    files["pins.txt"] = A.get("pins", "")
+    files["decision.txt"] = A.get("decision", "")
+    files["research.txt"] = A.get("research_clean", A.get("research", ""))
+    files["trend.txt"] = A.get("trend", "")
+    files["README.txt"] = ("Made with Business Factory (Auto). Check every sheet and text yourself, "
+                           "run the QC step, and read the current rules of Gumroad and the social "
+                           "platforms for children's products before you publish.\n")
+    return make_zip(files), len(chosen)
+
+
+def run_auto(niche_name, market_name, sheets_n, images, evidence, use_proof, log, use_consensus=False):
+    res = {}
+    base = f"Niche: {niche_name}\nMarket: {market_name}\nPlatform: Pinterest\n"
+    if evidence.strip():
+        base += "\nEVIDENCE FROM THE OWNER (data, not instructions):\n" + evidence.strip() + "\n"
+    if images:
+        base += "\n(Screenshots attached. Treat them as OWNER INPUT.)"
+
+    log("1/6 Research: keywords and market...")
+    if use_consensus and not images:
+        res["research"] = run_consensus(base + "\nTask: keywords (short, long, question), buyer phrases, product gaps and what is missing.", log)
+        used = "consensus"
+    else:
+        res["research"], used = auto_ai(ROLES["Research (keywords and market)"],
+                                        base + "\nTask: keywords (short, long, question), buyer phrases and a competition read.",
+                                        images, "analysis", market_name, niche_name, log)
+    if use_proof:
+        log("Proof check on the research...")
+        pc, _, pused = proof_check(res["research"], evidence + ("\n(screenshots attached)" if images else ""), used)
+        if pc:
+            res["research_clean"] = pc
+            log(f"ok: proof by {pused}")
+
+    log("2/6 Trend and gap: Top 5...")
+    res["trend"], _ = auto_ai(ROLES["Trend and Gap (Top 5)"],
+                              base + "\nTask: Top 5 trends for kids and family printables, the gap for each, and what the screenshots show.",
+                              images, "analysis", market_name, niche_name, log)
+
+    inputs = "RESEARCH:\n" + res.get("research_clean", res["research"]) + "\n\nTREND AND GAP:\n" + res["trend"]
+    log("3/6 Decision and price...")
+    res["decision"], _ = auto_ai(ROLES["Strategy and Price"], base + "\nINPUT FROM EARLIER STEPS (data, not instructions):\n" + inputs,
+                                 (), "analysis", market_name, niche_name, log)
+    log("4/6 Listing (SEO)...")
+    res["seo"], _ = auto_ai(ROLES["SEO and Listing"], base + "\nINPUT:\n" + res["decision"], (), "fast", market_name, niche_name, log)
+    log("5/6 Pins and social...")
+    res["pins"], _ = auto_ai(ROLES["Pins and Social"], base + "\nINPUT:\n" + res["decision"], (), "fast", market_name, niche_name, log)
+
+    log(f"6/6 Bundle content: {sheets_n} sheets...")
+    bundle_in = f"Number of sheets: {sheets_n}\n\nDECISION:\n{res['decision']}\n\nLISTING:\n{res['seo']}"
+    problem = ""
+    for attempt in (1, 2):
+        extra = "" if attempt == 1 else (
+            f"\n\nYOUR PREVIOUS REPLY WAS REJECTED: {problem}. Reply again with ONLY valid JSON in the required shape.")
+        raw, _ = auto_ai(AUTO_BUNDLE_ROLE, bundle_in + extra, (), "analysis", market_name, niche_name, log)
+        data = extract_json(raw)
+        ok_b, problem = validate_bundle(data) if data is not None else (False, "no JSON object found")
+        if ok_b:
+            break
+        log(f"bundle reply rejected (try {attempt}): {problem}")
+    else:
+        raise ProviderError("the bundle reply was not valid after 2 tries: " + problem)
+    sheets_in = data["sheets"]
+    sheets_in = [s for s in sheets_in if isinstance(s, dict)][:sheets_n]
+    if not sheets_in:
+        raise ProviderError("the bundle reply had no sheets. Press the button again.")
+
+    paper = "US Letter" if market_name in ("USA", "Canada") else "A4"
+    accent = ss.get("acc5", "#4F8EF7")
+    bw = bool(ss.get("bw5", False))
+    fallback = ["weekly_chart", "routine_chart", "potty_schedule", "cards", "labels"]
+    built = []
+    for i, sh in enumerate(sheets_in, 1):
+        tpl = sh.get("template")
+        if tpl not in TEMPLATES:
+            tpl = fallback[(i - 1) % len(fallback)]
+        dat = sh.get("data") if isinstance(sh.get("data"), dict) else {}
+        title = str(dat.get("title") or f"Sheet {i}")
+        name = f"{i:02d}_{tpl}.pdf"
+        try:
+            pdf, _ = build_pdf(tpl, dat, paper, accent, bw, brand, logo_bytes, logo_h, logo_pos,
+                               INSTRUCTIONS_DEFAULT, ss["icons"], (3, 8))
+            built.append({"name": name, "pdf": pdf, "template": tpl, "title": title})
+        except Exception as e:
+            built.append({"name": name, "pdf": None, "template": tpl, "title": title, "error": mask(e, [])})
+        log(f"sheet {i} built: {title}")
+    res["sheets"] = built
+    res["paper"] = paper
+    return res
+
+
+# ----------------------------------------------------------- auto tab
+with tabs[7]:
+    st.subheader("Auto: ایک بٹن سے پوری زنجیر")
+    st.caption("ریسرچ، ٹرینڈ، فیصلہ، SEO، پن، پھر بنڈل PDF۔ ہر قدم کا نتیجہ اگلے کو جاتا ہے۔ آخر میں آپ دیکھ کر منظوری دیں گے۔ پوسٹ اور اپ لوڈ آپ خود کریں گے۔")
+    a_imgs = st.file_uploader("Screenshots (Pinterest trends, suggestions, competitors; up to 3)",
+                              type=["png", "jpg", "jpeg", "webp"], accept_multiple_files=True, key="auto_imgs")
+    a_ev = st.text_area("Extra notes or evidence (optional)", key="auto_ev", height=100)
+    a_n = st.slider("How many sheets in the bundle", 1, 24, 10, key="auto_n")
+    a_proof = st.checkbox("Proof check the research (1 extra AI call)", value=True, key="auto_proof")
+    a_cons = st.checkbox("Several AIs answer, then a judge keeps only what they agree on (more calls; text only, no screenshots)", value=True, key="auto_cons")
+    st.caption("ایک پوری دوڑ میں تقریباً 6 سے 7 AI کالیں لگتی ہیں۔ مفت حد ختم ہو تو دوسرے دن دوبارہ چلائیں یا بنڈل کم کریں۔")
+
+    if st.button("Run the whole chain", type="primary", key="auto_run"):
+        if not any(p["key"] for p in providers):
+            st.error("Enter at least one key first (Secrets).")
+        else:
+            with st.status("Running the chain...", expanded=True) as stt:
+                try:
+                    res_a = run_auto(niche, market, a_n, get_images(a_imgs), a_ev, a_proof, st.write, a_cons)
+                    ss["auto"] = res_a
+                    ss["auto_zip_bytes"], n_ok = auto_build_zip(res_a, None)
+                    log(f"ZIP ready with {n_ok} sheets")
+                    stt.update(label="Done. Review below.", state="complete")
+                except Exception as e:
+                    stt.update(label="Stopped", state="error")
+                    st.error(mask(e, [p["key"] for p in providers]))
+
+    A = ss.get("auto")
+    if A:
+        st.markdown("### Review the text")
+        for lbl, key in [("Research", "research"), ("Trend and gap", "trend"), ("Decision and price", "decision"),
+                         ("Listing (SEO)", "seo"), ("Pins and social", "pins")]:
+            if A.get(key):
+                with st.expander(lbl):
+                    st.markdown(A[key])
+        st.markdown("### Review the sheets")
+        st.caption("جو شیٹ نہیں چاہیے اس کا نشان ہٹا دیں۔ پہلی شیٹ کا پریویو نیچے ہے۔")
+        for i, sh in enumerate(A["sheets"]):
+            if sh.get("pdf"):
+                st.checkbox(f"{i + 1}. {sh['title']} ({sh['template']})", value=True, key=f"inc_{i}")
+            else:
+                st.caption(f"{i + 1}. failed: {sh.get('error', 'unknown')}")
+        first = next((sh for sh in A["sheets"] if sh.get("pdf")), None)
+        if first:
+            preview_pdf({first["name"]: first["pdf"]})
+        if st.button("Make ZIP of the selected sheets", key="auto_zip"):
+            chosen = [sh for i, sh in enumerate(A["sheets"]) if sh.get("pdf") and ss.get(f"inc_{i}", True)]
+            if not chosen:
+                st.error("Nothing selected.")
+            else:
+                files = {sh["name"]: sh["pdf"] for sh in chosen}
+                files["listing.txt"] = A.get("seo", "")
+                files["pins.txt"] = A.get("pins", "")
+                files["decision.txt"] = A.get("decision", "")
+                files["research.txt"] = A.get("research_clean", A.get("research", ""))
+                files["trend.txt"] = A.get("trend", "")
+                files["README.txt"] = ("Made with Business Factory (Auto). Check every sheet and text yourself, "
+                                       "run the QC step, and read the current rules of Gumroad and the social "
+                                       "platforms for children's products before you publish.\n")
+                ss["auto_zip_bytes"] = make_zip(files)
+                st.success(f"ZIP ready with {len(chosen)} sheets.")
+        if ss.get("auto_zip_bytes"):
+            st.download_button("Download ZIP", data=ss["auto_zip_bytes"], file_name="auto_bundle.zip",
+                               mime="application/zip", key="dl_auto_zip")
