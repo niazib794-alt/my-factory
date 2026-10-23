@@ -515,6 +515,99 @@ st.info("یہ ایپ ڈرافٹس تیار کرتی ہے۔ حقیقی سرچ/AI 
 
 cfg,tavkey,search_count,allow_calls,image_cfg=make_provider_config()
 ss=st.session_state
+
+# ---------- API testing center: user-triggered, no secret values are displayed ----------
+def test_ai_endpoint(name, provider):
+    if provider.get("kind") == "gemini":
+        keys = provider.get("keys") or ([provider.get("key")] if provider.get("key") else [])
+        if not keys:
+            return False, "Key نہیں لگی"
+        errors=[]
+        for idx, k in enumerate(keys, start=1):
+            out, err = gemini("Reply with exactly: API_TEST_OK", k, provider.get("model", "gemini-2.5-flash"))
+            if out and "API_TEST_OK" in out:
+                return True, f"Gemini Key {idx}: کامیاب"
+            errors.append(f"Key {idx}: {err or 'جواب درست نہیں'}")
+        return False, "؛ ".join(errors)
+    if not provider.get("key"):
+        return False, "Key نہیں لگی"
+    if not provider.get("model"):
+        return False, "Model ID نہیں دیا گیا"
+    out, err = compatible("Reply with exactly: API_TEST_OK", provider.get("key"), provider.get("base", ""), provider.get("model", ""), provider.get("headers"))
+    if out and "API_TEST_OK" in out:
+        return True, "API جواب دے رہی ہے"
+    return False, err or "API سے متوقع جواب نہیں ملا"
+
+def test_tavily_endpoint(key_value):
+    if not key_value:
+        return False, "Key نہیں لگی"
+    results, err = tavily_search("printable kids bedtime routine chart", key_value, count=1)
+    if results:
+        return True, f"Search کامیاب — {len(results)} نتیجہ ملا"
+    return False, err or "کوئی نتیجہ نہیں ملا؛ Key/limit چیک کریں"
+
+def test_image_endpoint(provider):
+    if not provider.get("key"):
+        return False, "Key نہیں لگی"
+    base=(provider.get("base") or "").rstrip("/")
+    if not base:
+        return False, "Base URL نہیں دیا گیا"
+    # A models-list probe is free on compatible services and avoids creating a billable image.
+    try:
+        url=base if base.endswith("/models") else base+"/models"
+        r=requests.get(url,headers={"Authorization":f"Bearer {provider['key']}","Content-Type":"application/json"},timeout=20)
+        if r.status_code < 400:
+            return True, "Endpoint نے جواب دیا؛ اصل image generation الگ سے ٹیسٹ ہوگی"
+        return False, f"HTTP {r.status_code}; ممکن ہے یہ سروس /models سپورٹ نہ کرتی ہو"
+    except Exception as e:
+        return False, f"کنکشن ٹیسٹ ناکام: {type(e).__name__}"
+
+with st.expander("🧪 API TEST CENTER — تمام Keys ایک بٹن سے ٹیسٹ کریں", expanded=True):
+    st.caption("یہ ٹیسٹ صرف آپ کے بٹن دبانے پر چلیں گے۔ AI ٹیسٹ مختصر API درخواست بھیجتا ہے؛ Image API کا ابتدائی ٹیسٹ تصویر بنائے بغیر endpoint چیک کرتا ہے۔")
+    if st.button("تمام API Keys ٹیسٹ کریں", type="primary", key="run_all_api_tests"):
+        statuses=[]
+        with st.spinner("API Keys ٹیسٹ ہو رہی ہیں…"):
+            # Test each Gemini credential separately, so the user can see individual green checks.
+            gemini_keys=cfg.get("Gemini",{}).get("keys",[])
+            if gemini_keys:
+                for idx,k in enumerate(gemini_keys, start=1):
+                    out,err=gemini("Reply with exactly: API_TEST_OK",k,cfg["Gemini"].get("model","gemini-2.5-flash"))
+                    ok=bool(out and "API_TEST_OK" in out)
+                    statuses.append((f"Gemini Key {idx}",ok,"API جواب درست ملا" if ok else (err or "غیر متوقع جواب")))
+            else:
+                statuses.append(("Gemini",False,"Key نہیں لگی"))
+            for name,provider in cfg.items():
+                if name=="Gemini":
+                    continue
+                if provider.get("key"):
+                    ok,msg=test_ai_endpoint(name,provider)
+                    statuses.append((name,ok,msg))
+            if tavkey:
+                ok,msg=test_tavily_endpoint(tavkey)
+                statuses.append(("Tavily Search",ok,msg))
+            else:
+                statuses.append(("Tavily Search",False,"Key نہیں لگی"))
+            # Image endpoints: no billable image generation is triggered by this diagnostic.
+            for idx in range(1,4):
+                ik=st.session_state.get(f"image_key_{idx}","").strip() or secret(f"IMAGE_API_KEY_{idx}")
+                ib=st.session_state.get(f"image_base_{idx}","").strip() or secret(f"IMAGE_API_BASE_URL_{idx}")
+                im=st.session_state.get(f"image_model_{idx}","").strip() or secret(f"IMAGE_API_MODEL_{idx}")
+                if ik or ib or im:
+                    if not (ik and ib and im):
+                        statuses.append((f"Image API {idx}",False,"Key، Base URL اور Model ID تینوں درکار ہیں"))
+                    else:
+                        ok,msg=test_image_endpoint({"key":ik,"base":ib,"model":im})
+                        statuses.append((f"Image API {idx}",ok,msg))
+        ss["api_test_results"]=[{"name":n,"ok":ok,"message":msg} for n,ok,msg in statuses]
+        ss["api_test_time"]=now_iso()
+    if ss.get("api_test_results"):
+        st.caption("آخری ٹیسٹ: "+str(ss.get("api_test_time","")))
+        for item in ss["api_test_results"]:
+            if item["ok"]:
+                st.success(f"✅ {item['name']} — OK: {item['message']}")
+            else:
+                st.error(f"❌ {item['name']} — {item['message']}")
+
 DEFAULTS={"project":{},"sources":[],"research_raw":"","research_json":None,"research_report":"","trend":"","decision":"","seo":"","spec":"","pins":"","qc":"","pdfs":{},"zip_bytes":None,"auto_result":None,"chat_log":[],"icons":{},"results_log":"","activity_log":[],"last_images":[]}
 for k,v in DEFAULTS.items():
     if k not in ss: ss[k]=v.copy() if isinstance(v,(dict,list)) else v
