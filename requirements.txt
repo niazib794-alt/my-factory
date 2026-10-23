@@ -1,5 +1,5 @@
-treamlit>=1.39,<2.0
-requests>=2.31,<3.0
-reportlab>=4.0,<5.0
-Pillow>=10.0,<13.0
-pypdf>=5.0,<7.0
+streamlit
+requests
+reportlab
+Pillow
+pypdf
