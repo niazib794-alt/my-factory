@@ -21,11 +21,11 @@ from reportlab.lib.units import mm
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, KeepTogether
 from reportlab.lib.utils import ImageReader
 
-APP = "Business Factory VIP — Super Intelligent Business Bot"
-VERSION = "4.0-vip-master"
-NICHES = ["Routine + Reward Charts", "Night + Bedtime Routine", "ADHD Brain Dump Planner for Children", "Transition Toolkit for Kids"]
+APP = "Business Factory v2 — Super Intelligent Studio"
+VERSION = "3.0-upgrade"
+NICHES = ["Routine Charts (morning, afternoon, evening, daily, weekly, monthly, bedtime and night, chore charts)", "ADHD Brain Dump Planner for Children", "Transition Toolkit for Kids (first-then cards)", "Behaviour Charts for Kids"]
 MARKETS = ["USA", "UK", "Canada", "Australia", "Europe"]
-PLATFORMS = ["Pinterest", "Instagram", "Facebook", "TikTok", "YouTube", "Reddit", "X", "WhatsApp Business", "Gumroad", "Etsy (manual research only)"]
+PLATFORMS = ["Pinterest", "Gumroad", "Etsy (manual research only)", "Instagram", "Facebook"]
 PALETTES = {
     "Calm blue + mint": ("#243B53", "#D9EAF2", "#D7F0E5", "#FFFFFF"),
     "Soft lavender": ("#433B66", "#E8E2F5", "#F7E5EF", "#FFFFFF"),
@@ -35,10 +35,12 @@ PALETTES = {
 }
 TEMPLATE_NAMES = {
     "routine_chart": "Routine Chart", "weekly_chart": "Weekly Reward Chart",
-    "bedtime_routine": "Night + Bedtime Routine Checklist", "transition_cards": "Transition Toolkit Visual Cards",
     "brain_dump": "Kids Brain Dump & Thought Organizer", "priority_list": "Must Do / Important / Nice To Do",
-    "feelings_corner": "Notes & Feelings Corner", "cards": "Visual Routine Cards", "labels": "Printable Labels"
+    "feelings_corner": "Notes & Feelings Corner", "cards": "Visual Routine Cards", "labels": "Printable Labels",
+    "transition_cards": "Transition First-Then Cards", "bedtime_routine": "Bedtime Routine Checklist",
+    "behaviour_board": "Behaviour Star Board"
 }
+STYLES = ["Classic", "Bold", "Soft", "Compact"]
 
 MASTER = """You are the coordinated intelligence engine for a private, owner-controlled digital printable business.
 Twelve specialist responsibilities operate as one system: (1) Research & Demand, (2) Trend & Opportunity,
@@ -47,8 +49,8 @@ Twelve specialist responsibilities operate as one system: (1) Research & Demand,
 (11) Analytics & Experiments, (12) Memory, Security & Resource Management. A central orchestrator routes work,
 passes structured handoffs, checks dependencies, reconciles conflicts and reports limitations honestly.
 
-BUSINESS SCOPE: Work only in these four niches unless the owner explicitly changes scope:
-A) Routine + Reward Charts; B) Night + Bedtime Routine; C) ADHD Brain Dump Planner for Children (ages 6–12 when appropriate); D) Transition Toolkit for Kids. Research and rank all four independently before selecting one. Do not collapse Night/Bedtime into Routine + Reward when comparing opportunities.
+BUSINESS SCOPE: Work only in these two niches unless the owner explicitly changes scope:
+A) Routine + Reward Charts; B) ADHD Brain Dump Planner for Children.
 Target markets: USA, UK, Canada, Australia, and Europe (specify country when possible).
 The product is an organizational/visual support, not medical treatment. Do not promise health, ADHD, autism,
 behavioral, educational, or guaranteed outcomes. Avoid diagnosis or medical claims.
@@ -71,9 +73,9 @@ Each concept: rank, concept_name, buyer_problem, distinctive_value, page_plan, v
 pin_title, pin_description, hashtags, design_prompt, evidence_notes, confidence. Never invent metrics."""
 ROLE_TREND = """Trend & Opportunity Analyst. From the supplied evidence, separate repeated observations from weak signals. Give up to 5 opportunity hypotheses, source IDs, counter-evidence, confidence and one cheap validation test each. No invented metrics."""
 ROLE_DECISION = """Strategy, Market & Pricing Analyst. Compare concepts using transparent heuristic weights: buyer-problem evidence 25%, search-intent evidence 20%, differentiation 20%, usefulness/design feasibility 15%, production feasibility 10%, price feasibility 10%. If evidence is missing, mark UNKNOWN and reduce confidence. Score is a prioritization aid, not a sales forecast. Separate observed prices from suggested prices."""
-ROLE_SEO = """SEO & Listing Specialist. Research-backed SEO only. Create primary, secondary, long-tail and problem-language keyword clusters; map each to search intent and source IDs where possible; separate observed terms from AI-suggested terms. Produce a platform-specific Pinterest title, description, relevant keywords, board idea, alt text and CTA; also marketplace title/description/tags/attributes and buyer instructions when requested. Explain why each keyword belongs, avoid stuffing, keep copy natural, date trend observations, and mark unavailable search volumes UNKNOWN. Never claim ranking, sales, or traffic guarantees. Avoid medical outcome promises."""
-ROLE_SPEC = """Product Creation Specialist. Return valid JSON with title, audience, pages[] and QC checklist. Every page must have a clear purpose, exact readable English text, layout blocks, icon suggestions, whitespace, print-safe margins, type hierarchy, color palette with HEX codes, contrast guidance, paper size, bleed/no-bleed decision, grayscale alternative and print notes. Define icons by meaning and placement; do not rely on generated images to render text. Ensure pages are useful together, not duplicate filler. Include a page-by-page final visual inspection checklist and known limitations. Scope only one of the four approved niches: Routine + Reward Charts; Night + Bedtime Routine; ADHD Brain Dump Planner for Children; Transition Toolkit for Kids."""
-ROLE_PINS = """Marketing & Discovery Specialist. Build a platform-specific organic discovery package for the selected product for Pinterest, Instagram, Facebook, TikTok, YouTube, Reddit, X and WhatsApp Business when relevant. Do not reuse one generic caption everywhere: tailor format, opening hook, length, keywords, title, description, hashtags, alt text, CTA and creative brief to each platform. Include 3 differentiated Pinterest pin concepts, vertical video hooks/scripts for TikTok/Reels/Shorts, YouTube title/description ideas, and community-appropriate Reddit/Facebook copy. Ground keyword choices in supplied research; label unsupported trend claims UNKNOWN. Do not fabricate performance claims, testimonials, rankings or urgency. Respect platform norms; no spam or automatic posting. The pin promotes the printable; it is not the printable itself."""
+ROLE_SEO = """SEO & Listing Specialist. Create an accurate title, description, tags, attributes, file contents, buyer instructions and alt text for the actual selected printable. Never claim search volume or sales without sources. Avoid keyword stuffing and medical outcome promises."""
+ROLE_SPEC = """Product Creation Specialist. Return valid JSON with title, audience, pages[] and QC checklist. Every page must have a clear purpose, exact readable English text, layout blocks, icon suggestions, whitespace and print notes. Ensure the pages are useful together, not duplicate filler. Scope only Routine + Reward Charts or children's ADHD Brain Dump Planner."""
+ROLE_PINS = """Marketing & Discovery Specialist. Prepare 3 differentiated Pinterest pin concepts for the selected product. Each needs title, description, keywords, image brief, headline overlay text, visual hierarchy and CTA. Do not fabricate performance claims, testimonials, rankings or urgency. The pin promotes the printable; it is not the printable itself."""
 ROLE_QC = """Independent QC reviewer. Inspect the provided text/data and report PASS, PASS WITH WARNINGS, NEEDS REVISION, FAILED, NOT TESTED, or UNAVAILABLE for each category: accuracy/evidence, originality risk, spelling, readability, child-safety/claims, market fit, page completeness, print layout, SEO accuracy. List exact defects and corrections. Do not say visual layout passed if no rendered pages were inspected."""
 ROLE_CHAT = """Helpful operator for the Business Factory app. Answer briefly in Urdu if the user writes Urdu/Hindi, but keep product copy in English when requested. Respect current project context. Do not claim tools or publishing actions that were not performed."""
 
@@ -139,96 +141,54 @@ def compatible(prompt, key, base, model, extra_headers=None):
     except Exception: return "", "Unexpected OpenAI-compatible response"
 def make_provider_config():
     with st.sidebar:
-        st.header("AI، سرچ اور امیج سیٹنگز")
-        st.caption("Keys کو code میں نہ لکھیں؛ Secrets یا temporary password fields استعمال کریں۔")
-        with st.expander("Gemini — تین Key slots", expanded=False):
-            g1=st.text_input("Gemini Key 1", type="password", key="temp_gemini")
-            g2=st.text_input("Gemini Key 2 (fallback)", type="password", key="temp_gemini2")
-            g3=st.text_input("Gemini Key 3 (fallback)", type="password", key="temp_gemini3")
-            gm=st.text_input("Gemini Model ID", value="gemini-2.5-flash", key="model_gemini")
-        with st.expander("Custom OpenAI-compatible providers — پانچ slots", expanded=False):
-            custom_slots=[]
-            for i in range(1,6):
-                st.markdown(f"**Custom Provider {i}**")
-                cname=st.text_input(f"Provider {i} name",value=("Custom" if i==1 else f"Custom{i}"),key=f"custom_name_{i}")
-                ckey=st.text_input(f"Provider {i} API Key",type="password",key=f"temp_custom_{i}")
-                cbase=st.text_input(f"Provider {i} base URL",placeholder="https://provider.example/v1",key=f"custom_base_{i}")
-                cmodel=st.text_input(f"Provider {i} Model ID",key=f"custom_model_{i}")
-                custom_slots.append((cname,ckey,cbase,cmodel,i))
-        with st.expander("Known providers (optional)", expanded=False):
+        st.header("AI اور سرچ سیٹنگز")
+        st.caption("Keys صرف موجودہ سیشن میں یا Secrets سے پڑھی جاتی ہیں؛ انہیں کوڈ میں نہ لکھیں۔")
+        with st.expander("Temporary API keys (optional)", expanded=False):
+            tg=st.text_input("Gemini API key", type="password", key="temp_gemini")
             tor=st.text_input("OpenRouter API key", type="password", key="temp_openrouter")
             tgr=st.text_input("Groq API key", type="password", key="temp_groq")
             tm=st.text_input("Mistral API key", type="password", key="temp_mistral")
-            orm=st.text_input("OpenRouter Model ID", value="openai/gpt-4o-mini", key="model_openrouter")
-            grm=st.text_input("Groq Model ID", value="llama-3.3-70b-versatile", key="model_groq")
-            mm=st.text_input("Mistral Model ID", value="mistral-small-latest", key="model_mistral")
-        with st.expander("Search + image services", expanded=False):
-            tt=st.text_input("Tavily Search API Key", type="password", key="temp_tavily")
-            st.caption("Image service slots accept OpenAI-compatible /images/generations endpoints. Other APIs may need a dedicated adapter; a key alone does not make every service compatible.")
-            for i in range(1,4):
-                st.text_input(f"Image API {i} Key",type="password",key=f"image_key_{i}")
-                st.text_input(f"Image API {i} base URL",placeholder="https://provider.example/v1",key=f"image_base_{i}")
-                st.text_input(f"Image API {i} model ID",key=f"image_model_{i}")
+            tt=st.text_input("Tavily search key", type="password", key="temp_tavily")
+            tc=st.text_input("Custom compatible API key", type="password", key="temp_custom")
+            cb=st.text_input("Custom API base URL", placeholder="https://provider.example/v1", key="custom_base")
+            cm=st.text_input("Custom model name", key="custom_model")
+        gm=st.text_input("Gemini model", value="gemini-3.8-flash", key="model_gemini")
+        orm=st.text_input("OpenRouter model", value="openai/gpt-4o-mini", key="model_openrouter")
+        grm=st.text_input("Groq model", value="llama-3.3-70b-versatile", key="model_groq")
+        mm=st.text_input("Mistral model", value="mistral-small-latest", key="model_mistral")
         paid=st.checkbox("Allow configured providers even if they may be paid", value=True, key="allow_provider_calls")
         result_count=st.slider("Search results per query", 3, 10, 6, key="search_count")
-        st.caption("Provider availability, model IDs, pricing and free limits can change. Test before production.")
+        st.caption("ہر پرووائیڈر کی دستیابی، ماڈل نام، فری حدود اور قیمت بدل سکتی ہے۔")
     def key(temp, *envs): return st.session_state.get(temp, "").strip() or secret(*envs)
     cfg={
-        "Gemini":{"key":key("temp_gemini","GEMINI_API_KEY","GOOGLE_API_KEY"),"model":gm,"kind":"gemini"},
-        "OpenRouter":{"key":key("temp_openrouter","OPENROUTER_API_KEY"),"model":orm,"kind":"compat","base":"https://openrouter.ai/api/v1","headers":{"HTTP-Referer":"https://streamlit.io","X-Title":"Business Factory VIP"}},
-        "Groq":{"key":key("temp_groq","GROQ_API_KEY"),"model":grm,"kind":"compat","base":"https://api.groq.com/openai/v1","headers":{}},
+        "Gemini":{"key":key("temp_gemini","GEMINI_API_KEY","GOOGLE_API_KEY","GEMINI_KEY_1"),"model":gm,"kind":"gemini"},
+        "OpenRouter":{"key":key("temp_openrouter","OPENROUTER_API_KEY","OPENROUTER_KEY"),"model":orm,"kind":"compat","base":"https://openrouter.ai/api/v1","headers":{"HTTP-Referer":"https://streamlit.io","X-Title":"Business Factory v2"}},
+        "Groq":{"key":key("temp_groq","GROQ_API_KEY","GROQ_KEY"),"model":grm,"kind":"compat","base":"https://api.groq.com/openai/v1","headers":{}},
         "Mistral":{"key":key("temp_mistral","MISTRAL_API_KEY"),"model":mm,"kind":"compat","base":"https://api.mistral.ai/v1","headers":{}},
+        "Custom":{"key":key("temp_custom","CUSTOM_API_KEY","CUSTOM_KEY"),"model":st.session_state.get("custom_model","").strip() or secret("CUSTOM_MODEL"),"kind":"compat","base":st.session_state.get("custom_base","").strip() or secret("CUSTOM_API_BASE_URL","CUSTOM_API_URL"),"headers":{}},
     }
-    # Multiple Gemini keys are failover credentials for the same configured model.
-    cfg["Gemini"]["keys"]=[x for x in [cfg["Gemini"]["key"],key("temp_gemini2","GEMINI_API_KEY_2"),key("temp_gemini3","GEMINI_API_KEY_3")] if x]
-    for cname,ckey,cbase,cmodel,i in custom_slots:
-        nm=(cname or f"Custom{i}").strip()
-        if not nm: nm=f"Custom{i}"
-        # Keep names unique to avoid one slot silently replacing another.
-        base_name=nm; suffix=2
-        while nm in cfg:
-            nm=f"{base_name}_{suffix}"; suffix+=1
-        env_suffix=str(i)
-        k=ckey.strip() or secret(f"CUSTOM_API_KEY_{i}") or (secret("CUSTOM_API_KEY","CUSTOM_KEY") if i==1 else "")
-        b=cbase.strip() or (secret(f"CUSTOM_API_BASE_URL_{i}") or (secret("CUSTOM_API_BASE_URL","CUSTOM_API_URL") if i==1 else ""))
-        m=cmodel.strip() or (secret(f"CUSTOM_MODEL_{i}") or (secret("CUSTOM_MODEL") if i==1 else ""))
-        cfg[nm]={"key":k,"model":m,"kind":"compat","base":b,"headers":{}}
+    cfg["Perplexity"]={"key":key("temp_perplexity","PERPLEXITY_API_KEY"),"model":secret("PERPLEXITY_MODEL") or "sonar","kind":"compat","base":"https://api.perplexity.ai","headers":{}}
     tk=key("temp_tavily","TAVILY_API_KEY","TAVILY_KEY")
-    image_cfg=[]
-    for i in range(1,4):
-        ik=key(f"image_key_{i}",f"IMAGE_API_KEY_{i}")
-        ib=st.session_state.get(f"image_base_{i}","").strip() or secret(f"IMAGE_API_BASE_URL_{i}")
-        im=st.session_state.get(f"image_model_{i}","").strip() or secret(f"IMAGE_API_MODEL_{i}")
-        if ik and ib and im: image_cfg.append({"key":ik,"base":ib,"model":im,"name":f"Image API {i}"})
-    return cfg, tk, result_count, paid, image_cfg
-
+    return cfg, tk, result_count, paid
 def call_one(prompt, name, cfg):
     p=cfg[name]
-    if p["kind"]=="gemini":
-        keys=p.get("keys") or ([p.get("key")] if p.get("key") else [])
-        errors=[]
-        for k in keys:
-            if not k: continue
-            out,err=gemini(prompt,k,p["model"])
-            if out.strip(): return out,""
-            errors.append(err)
-        return "", "Gemini keys exhausted: " + " | ".join(errors or ["key missing"])
     if not p.get("key"): return "", f"{name}: key missing"
+    if p["kind"]=="gemini": return gemini(prompt,p["key"],p["model"])
     return compatible(prompt,p["key"],p.get("base",""),p["model"],p.get("headers"))
 def ask_ai(prompt, cfg, preferred=None):
     order=[]
     if preferred and preferred in cfg: order.append(preferred)
-    order += [x for x in cfg.keys() if x not in order]
+    order += [x for x in ["Gemini","OpenRouter","Groq","Mistral","Custom"] if x not in order]
     errors=[]
     for name in order:
-        if not (cfg[name].get("key") or cfg[name].get("keys")): continue
+        if not cfg[name].get("key"): continue
         out, err=call_one(prompt,name,cfg)
         if out.strip(): return out, name, errors
         errors.append(f"{name}: {err}")
     return "", "None", errors or ["No API key configured"]
 def multi_ai_crosscheck(question, cfg, primary=None, max_providers=3):
     """Optional second-opinion pass. Agreement is never treated as source evidence."""
-    names=[n for n,p in cfg.items() if (p.get("key") or p.get("keys")) and n != primary]
+    names=[n for n in ["Gemini","OpenRouter","Groq","Mistral","Custom"] if cfg.get(n,{}).get("key") and n != primary]
     names=names[:max_providers]
     if not names: return "", ["No second AI provider is configured; source verification still required."]
     answers=[]; errors=[]
@@ -270,9 +230,25 @@ def uniq_sources(sources):
     return out
 def source_prompt(sources):
     if not sources: return "NO AUTOMATIC SOURCES COLLECTED. All market claims must be marked UNKNOWN or INFERENCE."
-    return "\n\n".join(f"[S{i}] {s.get('title','Untitled')}\nNICHE QUERY: {s.get('niche_query','not tagged')}\nURL: {s.get('url','')}\nCOLLECTED: {s.get('collected_at','')}\nSNIPPET: {s.get('snippet','')[:1300]}" for i,s in enumerate(sources,1))
+    return "\n\n".join(f"[S{i}] {s.get('title','Untitled')}\nURL: {s.get('url','')}\nCOLLECTED: {s.get('collected_at','')}\nSNIPPET: {s.get('snippet','')[:1300]}" for i,s in enumerate(sources,1))
 def json_research_prompt(niche, audience, market, platform, goal, sources, owner_notes):
     return MASTER+"\n\nROLE: "+ROLE_RESEARCH+f"\n\nNICHE: {niche}\nAUDIENCE: {audience}\nMARKET: {market}\nPLATFORM: {platform}\nGOAL: {goal}\nOWNER NOTES: {owner_notes or 'None'}\n\nSOURCE RECORDS:\n{source_prompt(sources)}\n\nReturn JSON only. For every source-backed claim include source_ids such as [\"S1\"]. If no source supports a claim, mark it INFERENCE or UNKNOWN. Do not treat a search snippet as full page verification."
+def niche_pack_prompt(niche, market):
+    return f"""You are a careful market researcher and printable-product copywriter for one small owner.
+NICHE (use only this one): {niche}
+MARKET: {market}
+Return ONLY valid JSON with these keys:
+"research": {{"buyer_problems": [...], "popular_formats": [...], "gaps": [...], "buyer_phrases": [...], "sources": [{{"title":"...","url":"...","date":"..."}}]}}
+"titles": 3 Gumroad title options (main keyword first, no clickbait, no medical or guaranteed-result words).
+"descriptions": 2 product descriptions (first 2 lines with the main keyword and the benefit; then what is included, US Letter and A4 sizes, how to use in 3 steps, who it is for, short FAQ).
+"keywords": {{"short_tail": [...], "long_tail": [...], "question": [...]}}
+"bundles": 3 or 4 bundle ideas, each with name, list of pages, page count, paper sizes, and price range.
+"pdf_design_prompts": 4 high-level prompts for a designer or AI to build the printable (layout, colour palette as hex codes, icon style, font style). Original art only, no copied characters, no brand names.
+"pin_prompts": 5 Pinterest pin prompts (1000 x 1500, one topic each) with pin title, description and text on the image.
+"safety_check": list any wording that could be medical, diagnostic or a guaranteed result, and the safe replacement.
+RULES: Every claim must have a source url from the research, or be labelled GUESS. Do not invent search volumes, prices, sales, rankings or trends. If there is no evidence for a point, say UNKNOWN. Keep English for product text, Urdu only inside explanation fields if needed."""
+
+
 def markdown_report(project, sources, raw, provider, errors=None):
     lines=[f"# {APP} — Research Report",f"- Generated: {now_iso()}",f"- Provider: {provider}",f"- Project: {project.get('niche','')} | {project.get('market','')} | {project.get('platform','')}","","## Evidence status"]
     if not sources: lines.append("UNKNOWN — No automatic web sources were collected. Configure Tavily or add verified evidence manually.")
@@ -297,27 +273,6 @@ def pollinations_image(prompt, width=1000, height=1500, timeout=90):
     except Exception as e:
         raise RuntimeError(str(e))
 
-def openai_compatible_image(prompt, key, base, model, width=1000, height=1500, timeout=120):
-    """Adapter for image APIs that implement the OpenAI-compatible images/generations response shape."""
-    base=(base or "").rstrip("/")
-    url=base if base.endswith("/images/generations") else base+"/images/generations"
-    data,err=post_json(url,{"Authorization":f"Bearer {key}","Content-Type":"application/json"},{"model":model,"prompt":prompt,"size":f"{width}x{height}","n":1,"response_format":"b64_json"},timeout=timeout)
-    if err: raise RuntimeError(err)
-    try:
-        item=(data.get("data") or [])[0]
-        if item.get("b64_json"):
-            import base64
-            raw=base64.b64decode(item["b64_json"])
-            return raw,"image/png"
-        if item.get("url"):
-            r=requests.get(item["url"],timeout=timeout)
-            r.raise_for_status()
-            if not r.headers.get("content-type","").startswith("image/"): raise RuntimeError("Image URL did not return image content")
-            return r.content,r.headers.get("content-type","image/png")
-    except Exception as e:
-        raise RuntimeError(f"Image response was not in the supported format: {e}")
-    raise RuntimeError("Image API returned no usable image data")
-
 # ---------- PDF engine ----------
 def color(hexcode):
     try: return colors.HexColor(hexcode)
@@ -325,7 +280,7 @@ def color(hexcode):
 def paragraph(text, style):
     # Escape untrusted text, but allow explicitly-authored simple line breaks.
     return Paragraph(escape(str(text)).replace("\n","<br/>"), style)
-def make_pdf(title, template, data, page_name="US Letter", palette_name="Calm blue + mint", low_ink=False, logo_bytes=None, logo_pos="Bottom right"):
+def make_pdf(title, template, data, page_name="US Letter", palette_name="Calm blue + mint", low_ink=False, logo_bytes=None, logo_pos="Bottom right", style="Classic"):
     pagesize=A4 if page_name=="A4" else letter
     ink_hex, accent_hex, accent2_hex, white_hex=PALETTES["Low-ink grayscale" if low_ink else palette_name]
     ink,accent,accent2=map(color,(ink_hex,accent_hex,accent2_hex))
@@ -345,19 +300,10 @@ def make_pdf(title, template, data, page_name="US Letter", palette_name="Calm bl
         cmds=[("GRID",(0,0),(-1,-1),0.55,ink),("VALIGN",(0,0),(-1,-1),"MIDDLE"),("LEFTPADDING",(0,0),(-1,-1),6),("RIGHTPADDING",(0,0),(-1,-1),6),("TOPPADDING",(0,0),(-1,-1),5),("BOTTOMPADDING",(0,0),(-1,-1),5)]
         if header_row: cmds += [("BACKGROUND",(0,0),(-1,0),accent),("TEXTCOLOR",(0,0),(-1,0),ink)]
         t.setStyle(TableStyle(cmds)); story.append(t)
-    if template in ("routine_chart","weekly_chart","bedtime_routine"):
-        header("A calm bedtime routine checklist" if template=="bedtime_routine" else "A flexible routine and reward chart for home or classroom")
+    if template in ("routine_chart","weekly_chart"):
+        header("A flexible routine and reward chart for home or classroom")
         info_line(); story.append(Spacer(1,5*mm))
-        if template=="bedtime_routine":
-            tasks=data.get("tasks") or [{"time":"1","task":"Put toys away"},{"time":"2","task":"Put on pajamas"},{"time":"3","task":"Brush teeth"},{"time":"4","task":"Use the bathroom"},{"time":"5","task":"Choose a book"},{"time":"6","task":"Lights low and bedtime"}]
-            rows=[[paragraph("STEP",styles["BFCell"]),paragraph("MY BEDTIME TASK",styles["BFCell"]),paragraph("DONE",styles["BFCell"])]]
-            for x in tasks[:10]:
-                if isinstance(x,dict): when=str(x.get("time","")); task=str(x.get("task",""))
-                else: when=""; task=str(x)
-                rows.append([paragraph(when,styles["BFCell"]),paragraph(task,styles["BFCell"]),"□"])
-            table(rows,widths=[22*mm,105*mm,None],row_heights=[11*mm]+[14*mm]*(len(rows)-1))
-            story.extend([Spacer(1,5*mm),paragraph("Tonight I can choose a calm activity: ______________________________",styles["BFCell"]),Spacer(1,3*mm),paragraph("Grown-up note: adapt the steps to your child; this is a flexible routine, not a strict rule.",styles["BFSmall"])])
-        elif template=="weekly_chart":
+        if template=="weekly_chart":
             tasks=data.get("tasks") or ["Get ready","Brush teeth","Get dressed","Pack my things","Start homework","Put items away"]
             tasks=[str(x)[:70] for x in tasks[:10]]
             days=["Task","Mon","Tue","Wed","Thu","Fri","Sat","Sun"]
@@ -375,19 +321,6 @@ def make_pdf(title, template, data, page_name="US Letter", palette_name="Calm bl
                 rows.append([paragraph(when,styles["BFCell"]),paragraph(task,styles["BFCell"]),"□","________________"])
             table(rows,widths=[28*mm,65*mm,17*mm,None],row_heights=[11*mm]+[15*mm]*(len(rows)-1))
             story.extend([Spacer(1,5*mm),paragraph("My goal today: __________________________________________________________",styles["BFCell"])])
-    elif template=="transition_cards":
-        header("Visual cards for moving between activities")
-        cards=data.get("cards") or [{"label":"FIRST: Finish this activity"},{"label":"THEN: Choose the next activity"},{"label":"2-minute warning"},{"label":"Clean up together"},{"label":"Take a short break"},{"label":"Ask for help"},{"label":"Next: Homework"},{"label":"Next: Bedtime"}]
-        cards=cards[:24]; rows=[]
-        for i in range(0,len(cards),3):
-            row=[]
-            for item in cards[i:i+3]:
-                label=str(item.get("label","Card") if isinstance(item,dict) else item)[:55]
-                row.append(paragraph("◯<br/><br/><b>"+escape(label)+"</b><br/><br/>"+"Cut-out visual cue",ParagraphStyle("transition_card",parent=styles["BFCell"],alignment=1,fontSize=10,leading=14)))
-            while len(row)<3: row.append("")
-            rows.append(row)
-        table(rows,widths=[doc.width/3]*3,row_heights=[40*mm]*len(rows),header_row=False)
-        story.extend([Spacer(1,4*mm),paragraph("Use supportive language and adapt cues to the child. This toolkit is not a diagnostic or treatment tool.",styles["BFSmall"])])
     elif template=="brain_dump":
         header("A calm place to capture thoughts, tasks and ideas")
         info_line(); story.append(Spacer(1,4*mm))
@@ -414,6 +347,57 @@ def make_pdf(title, template, data, page_name="US Letter", palette_name="Calm bl
         for label in ["Something on my mind:","Something that went well:","What could help me next:"]:
             story.append(paragraph(label,styles["BFCell"])); table([[""],[""]],widths=[doc.width],row_heights=[11*mm,11*mm],header_row=False); story.append(Spacer(1,3*mm))
         story.append(paragraph("A trusted grown-up can help if I want support.",styles["BFSmall"]))
+    elif template=="transition_cards":
+        header("First, then: a gentle way to move between activities")
+        info_line(); story.append(Spacer(1,4*mm))
+        steps=data.get("steps") or [{"first":"Playing with blocks","then":"Clean up together"},{"first":"Screen time","then":"Wash hands"},{"first":"Outside play","then":"Snack time"},{"first":"Reading","then":"Get ready for bed"}]
+        rows=[]
+        for s in steps[:12]:
+            f=str(s.get("first","")) if isinstance(s,dict) else str(s)
+            th=str(s.get("then","")) if isinstance(s,dict) else ""
+            rows.append([Paragraph("<b>FIRST</b><br/>"+escape(f[:60]),styles["BFCell"]),Paragraph("<b>&#8594;</b>",ParagraphStyle("arr",parent=styles["BFCell"],alignment=1,fontSize=16)),Paragraph("<b>THEN</b><br/>"+escape(th[:60]),styles["BFCell"])])
+        table(rows,widths=[doc.width*0.42,doc.width*0.16,doc.width*0.42],row_heights=[20*mm]*len(rows),header_row=False)
+        story.append(Spacer(1,4*mm)); story.append(paragraph("Give a warning before each change, such as a timer. Adapt to the child's needs.",styles["BFSmall"]))
+    elif template=="bedtime_routine":
+        header("Bedtime routine: one step at a time")
+        info_line(); story.append(Spacer(1,4*mm))
+        tasks=data.get("tasks") or ["Pajamas on","Brush teeth","Wash face","Read one story","Lights out, goodnight"]
+        rows=[[Paragraph("<b>STEP</b>",styles["BFCell"]),Paragraph("<b>DONE</b>",styles["BFCell"]),Paragraph("<b>NOTE</b>",styles["BFCell"])]]
+        for x in tasks[:12]:
+            label=str(x.get("task","") if isinstance(x,dict) else x)[:60]
+            rows.append([Paragraph(escape(label),styles["BFCell"]),"[  ]","________________"])
+        table(rows,widths=[doc.width*0.55,doc.width*0.15,None],row_heights=[10*mm]+[14*mm]*(len(rows)-1))
+        story.append(Spacer(1,4*mm)); story.append(paragraph("Same steps, same order, every night. Celebrate calm moments, not perfect ones.",styles["BFSmall"]))
+    elif template=="behaviour_board":
+        header("My behaviour star board")
+        info_line(); story.append(Spacer(1,4*mm))
+        behaviours=data.get("tasks") or ["Kind words","Listening","Sharing","Calm voice"]
+        days=["Behaviour","Mon","Tue","Wed","Thu","Fri","Sat","Sun"]
+        rows=[[Paragraph("<b>"+escape(d)+"</b>",styles["BFCell"]) for d in days]]
+        for b in behaviours[:10]:
+            rows.append([Paragraph(escape(str(b)[:50]),styles["BFCell"])]+["[ ]"]*7)
+        table(rows,widths=[doc.width*0.30]+[doc.width*0.70/7]*7,row_heights=[11*mm]+[13*mm]*(len(rows)-1))
+        story.extend([Spacer(1,5*mm),Paragraph("<b>Total stars this week:</b> ________",styles["BFCell"]),Spacer(1,3*mm),Paragraph("Star reward chosen together: ____________________________",styles["BFCell"])])
+    elif template=="cards" and style!="Classic":
+        header("Cut-out visual cards")
+        cards=(data.get("cards") or [{"label":x} for x in ["GET READY","BRUSH TEETH","GET DRESSED","PACK BAG","HOMEWORK","TAKE A BREAK","CLEAN UP","BEDTIME"]])[:48]
+        ncol={"Bold":2,"Soft":3,"Compact":4}.get(style,3)
+        fs={"Bold":20,"Soft":14,"Compact":10}.get(style,14)
+        rh={"Bold":62*mm,"Soft":40*mm,"Compact":30*mm}.get(style,40*mm)
+        rows=[]
+        for i in range(0,len(cards),ncol):
+            row=[]
+            for item in cards[i:i+ncol]:
+                label=str(item.get("label","Card") if isinstance(item,dict) else item)[:45]
+                row.append(Paragraph("<b>"+escape(label)+"</b>",ParagraphStyle("c2",parent=styles["BFCell"],alignment=1,fontSize=fs,leading=fs+4)))
+            while len(row)<ncol: row.append("")
+            rows.append(row)
+        t2=Table(rows,colWidths=[doc.width/ncol]*ncol,rowHeights=[rh]*len(rows),hAlign="LEFT")
+        lw=0.6 if style=="Soft" else 1.2
+        cmds=[("BOX",(0,0),(-1,-1),lw,accent),("INNERGRID",(0,0),(-1,-1),lw,accent),("VALIGN",(0,0),(-1,-1),"MIDDLE")]
+        if style=="Soft": cmds.append(("BACKGROUND",(0,0),(-1,-1),accent2))
+        t2.setStyle(TableStyle(cmds)); story.append(t2)
+        story.append(Spacer(1,4*mm)); story.append(paragraph("Cut along the lines. Add your own drawings if helpful.",styles["BFSmall"]))
     elif template=="cards":
         header("Cut-out visual cards")
         cards=data.get("cards") or [{"label":x} for x in ["GET READY","BRUSH TEETH","GET DRESSED","PACK BAG","HOMEWORK","TAKE A BREAK","CLEAN UP","BEDTIME"]]
@@ -423,7 +407,7 @@ def make_pdf(title, template, data, page_name="US Letter", palette_name="Calm bl
             row=[]
             for item in cards[i:i+3]:
                 label=str(item.get("label","Card") if isinstance(item,dict) else item)[:45]
-                row.append(paragraph("◯<br/><br/><b>"+escape(label)+"</b>",ParagraphStyle("card",parent=styles["BFCell"],alignment=1,fontSize=11,leading=15)))
+                row.append(Paragraph("◯<br/><br/><b>"+escape(label)+"</b>",ParagraphStyle("card",parent=styles["BFCell"],alignment=1,fontSize=11,leading=15)))
             while len(row)<3: row.append("")
             rows.append(row)
         table(rows,widths=[doc.width/3]*3,row_heights=[39*mm]*len(rows),header_row=False)
@@ -433,7 +417,7 @@ def make_pdf(title, template, data, page_name="US Letter", palette_name="Calm bl
         labels=data.get("labels") or ["Morning","School","Homework","Break","Evening","Bedtime"]
         labels=[str(x)[:35] for x in labels[:40]]
         rows=[]
-        for i in range(0,len(labels),3): rows.append([paragraph("<b>"+escape(x)+"</b>",ParagraphStyle("lab",parent=styles["BFCell"],alignment=1,fontSize=10)) for x in labels[i:i+3]]+([""]*(3-len(labels[i:i+3]))))
+        for i in range(0,len(labels),3): rows.append([Paragraph("<b>"+escape(x)+"</b>",ParagraphStyle("lab",parent=styles["BFCell"],alignment=1,fontSize=10)) for x in labels[i:i+3]]+([""]*(3-len(labels[i:i+3]))))
         table(rows,widths=[doc.width/3]*3,row_heights=[18*mm]*len(rows),header_row=False)
     else: raise ValueError("Unsupported template: "+str(template))
     def footer(canvas, doc_):
@@ -509,105 +493,12 @@ def score_concept(c):
 
 # ---------- app ----------
 st.set_page_config(page_title=APP,page_icon="🧠",layout="wide")
-st.title("🧠 Business Factory VIP — Super Intelligent Business Bot")
-st.caption("4-Niche Research → Evidence Ranking → Product & Design → SEO & Social → PDF/ZIP → QC → owner approval")
+st.title("🧠 Business Factory v2 — Super Intelligent Studio")
+st.caption("Research → Opportunity → Design prompts → Pinterest → Printable bundle → QC → owner approval")
 st.info("یہ ایپ ڈرافٹس تیار کرتی ہے۔ حقیقی سرچ/AI کی سہولت کے لیے آپ کی اپنی API keys درکار ہو سکتی ہیں؛ کوئی فروخت یا ٹرینڈ فرضی طور پر تصدیق شدہ نہیں دکھایا جاتا۔")
 
-cfg,tavkey,search_count,allow_calls,image_cfg=make_provider_config()
+cfg,tavkey,search_count,allow_calls=make_provider_config()
 ss=st.session_state
-
-# ---------- API testing center: user-triggered, no secret values are displayed ----------
-def test_ai_endpoint(name, provider):
-    if provider.get("kind") == "gemini":
-        keys = provider.get("keys") or ([provider.get("key")] if provider.get("key") else [])
-        if not keys:
-            return False, "Key نہیں لگی"
-        errors=[]
-        for idx, k in enumerate(keys, start=1):
-            out, err = gemini("Reply with exactly: API_TEST_OK", k, provider.get("model", "gemini-2.5-flash"))
-            if out and "API_TEST_OK" in out:
-                return True, f"Gemini Key {idx}: کامیاب"
-            errors.append(f"Key {idx}: {err or 'جواب درست نہیں'}")
-        return False, "؛ ".join(errors)
-    if not provider.get("key"):
-        return False, "Key نہیں لگی"
-    if not provider.get("model"):
-        return False, "Model ID نہیں دیا گیا"
-    out, err = compatible("Reply with exactly: API_TEST_OK", provider.get("key"), provider.get("base", ""), provider.get("model", ""), provider.get("headers"))
-    if out and "API_TEST_OK" in out:
-        return True, "API جواب دے رہی ہے"
-    return False, err or "API سے متوقع جواب نہیں ملا"
-
-def test_tavily_endpoint(key_value):
-    if not key_value:
-        return False, "Key نہیں لگی"
-    results, err = tavily_search("printable kids bedtime routine chart", key_value, count=1)
-    if results:
-        return True, f"Search کامیاب — {len(results)} نتیجہ ملا"
-    return False, err or "کوئی نتیجہ نہیں ملا؛ Key/limit چیک کریں"
-
-def test_image_endpoint(provider):
-    if not provider.get("key"):
-        return False, "Key نہیں لگی"
-    base=(provider.get("base") or "").rstrip("/")
-    if not base:
-        return False, "Base URL نہیں دیا گیا"
-    # A models-list probe is free on compatible services and avoids creating a billable image.
-    try:
-        url=base if base.endswith("/models") else base+"/models"
-        r=requests.get(url,headers={"Authorization":f"Bearer {provider['key']}","Content-Type":"application/json"},timeout=20)
-        if r.status_code < 400:
-            return True, "Endpoint نے جواب دیا؛ اصل image generation الگ سے ٹیسٹ ہوگی"
-        return False, f"HTTP {r.status_code}; ممکن ہے یہ سروس /models سپورٹ نہ کرتی ہو"
-    except Exception as e:
-        return False, f"کنکشن ٹیسٹ ناکام: {type(e).__name__}"
-
-with st.expander("🧪 API TEST CENTER — تمام Keys ایک بٹن سے ٹیسٹ کریں", expanded=True):
-    st.caption("یہ ٹیسٹ صرف آپ کے بٹن دبانے پر چلیں گے۔ AI ٹیسٹ مختصر API درخواست بھیجتا ہے؛ Image API کا ابتدائی ٹیسٹ تصویر بنائے بغیر endpoint چیک کرتا ہے۔")
-    if st.button("تمام API Keys ٹیسٹ کریں", type="primary", key="run_all_api_tests"):
-        statuses=[]
-        with st.spinner("API Keys ٹیسٹ ہو رہی ہیں…"):
-            # Test each Gemini credential separately, so the user can see individual green checks.
-            gemini_keys=cfg.get("Gemini",{}).get("keys",[])
-            if gemini_keys:
-                for idx,k in enumerate(gemini_keys, start=1):
-                    out,err=gemini("Reply with exactly: API_TEST_OK",k,cfg["Gemini"].get("model","gemini-2.5-flash"))
-                    ok=bool(out and "API_TEST_OK" in out)
-                    statuses.append((f"Gemini Key {idx}",ok,"API جواب درست ملا" if ok else (err or "غیر متوقع جواب")))
-            else:
-                statuses.append(("Gemini",False,"Key نہیں لگی"))
-            for name,provider in cfg.items():
-                if name=="Gemini":
-                    continue
-                if provider.get("key"):
-                    ok,msg=test_ai_endpoint(name,provider)
-                    statuses.append((name,ok,msg))
-            if tavkey:
-                ok,msg=test_tavily_endpoint(tavkey)
-                statuses.append(("Tavily Search",ok,msg))
-            else:
-                statuses.append(("Tavily Search",False,"Key نہیں لگی"))
-            # Image endpoints: no billable image generation is triggered by this diagnostic.
-            for idx in range(1,4):
-                ik=st.session_state.get(f"image_key_{idx}","").strip() or secret(f"IMAGE_API_KEY_{idx}")
-                ib=st.session_state.get(f"image_base_{idx}","").strip() or secret(f"IMAGE_API_BASE_URL_{idx}")
-                im=st.session_state.get(f"image_model_{idx}","").strip() or secret(f"IMAGE_API_MODEL_{idx}")
-                if ik or ib or im:
-                    if not (ik and ib and im):
-                        statuses.append((f"Image API {idx}",False,"Key، Base URL اور Model ID تینوں درکار ہیں"))
-                    else:
-                        ok,msg=test_image_endpoint({"key":ik,"base":ib,"model":im})
-                        statuses.append((f"Image API {idx}",ok,msg))
-        ss["api_test_results"]=[{"name":n,"ok":ok,"message":msg} for n,ok,msg in statuses]
-        ss["api_test_time"]=now_iso()
-    if ss.get("api_test_results"):
-        st.caption("آخری ٹیسٹ: "+str(ss.get("api_test_time","")))
-        for item in ss["api_test_results"]:
-            if item["ok"]:
-                st.success(f"✅ {item['name']} — OK: {item['message']}")
-            else:
-                st.error(f"❌ {item['name']} — {item['message']}")
-
 DEFAULTS={"project":{},"sources":[],"research_raw":"","research_json":None,"research_report":"","trend":"","decision":"","seo":"","spec":"","pins":"","qc":"","pdfs":{},"zip_bytes":None,"auto_result":None,"chat_log":[],"icons":{},"results_log":"","activity_log":[],"last_images":[]}
 for k,v in DEFAULTS.items():
     if k not in ss: ss[k]=v.copy() if isinstance(v,(dict,list)) else v
@@ -647,6 +538,23 @@ def run_role(role, context, preferred=None, want_json=False):
 with tabs[0]:
     st.subheader("حصہ 1 — Deep Market Research")
     st.caption("Search results are evidence leads; snippets alone do not prove buyer demand.")
+    st.markdown("### One-click niche pack")
+    st.caption("One niche: titles, descriptions, keywords, bundle ideas, design prompts and pin prompts. Perplexity is tried first if its key is set (it searches the web and gives links).")
+    if st.button("Make the niche pack", key="niche_pack_btn", type="primary"):
+        with st.spinner("Researching and writing the pack..."):
+            pack_raw, pack_prov, pack_err = ask_ai(niche_pack_prompt(P["niche"], P["market"]), cfg, preferred="Perplexity")
+        pack=extract_json(pack_raw) if pack_raw else None
+        st.session_state["niche_pack"]={"raw":pack_raw or "","json":pack,"prov":pack_prov,"err":pack_err}
+    np_=st.session_state.get("niche_pack")
+    if np_:
+        if np_["prov"]: st.success(f"Answered by: {np_['prov']}")
+        else: st.error("No AI answered: " + " | ".join(np_["err"] or ["no key set"]))
+        if np_["json"]:
+            st.json(np_["json"])
+        elif np_["raw"]:
+            st.warning("The reply was not valid JSON. The raw text is below; re-run the pack if needed.")
+            st.text_area("Raw reply", np_["raw"], height=240)
+        st.download_button("Download the pack (.txt)", data=np_["raw"], file_name="niche_pack.txt", mime="text/plain", key="niche_pack_dl")
     c1,c2=st.columns(2)
     with c1:
         goal=st.text_input("Research goal",value="Find real buyer problems, competing printable formats, gaps and useful keywords",key="research_goal")
@@ -657,32 +565,6 @@ with tabs[0]:
         extra_queries=st.text_area("Extra queries (one per line)",key="extra_queries")
         owner_evidence=st.text_area("Your notes / screenshot observations (optional)",key="owner_evidence",height=90)
     manual_urls=st.text_area("Manually verified URLs (optional; URLs are recorded, not fetched)",key="manual_urls",height=70)
-    st.markdown("### چاروں نِچز کا مقابلہ")
-    st.caption("یہ الگ comparative scan چاروں niches کے لیے query evidence جمع کرتا ہے اور شواہد کی بنیاد پر مواقع rank کرتا ہے۔")
-    if st.button("Research and rank ALL 4 niches",key="rank_all_niches",use_container_width=True):
-        all_sources=[]; all_errors=[]
-        if not tavkey:
-            st.error("Tavily Search Key موجود نہیں؛ چاروں نِچز کی خودکار سرچ نہیں چل سکتی۔")
-        else:
-            prog=st.progress(0); total=len(NICHES)*2; done=0
-            for niche in NICHES:
-                qs=[f'"{niche}" printable {P["market"]}',f'"{niche}" kids parents teacher printable ideas']
-                for q in qs:
-                    found,err=tavily_search(q,tavkey,search_count); all_sources.extend([{**x,"niche_query":niche} for x in found])
-                    if err: all_errors.append(f"{niche} / {q}: {err}")
-                    done+=1; prog.progress(done/total)
-            prog.empty(); all_sources=uniq_sources(all_sources)
-            compare_prompt=MASTER+"\n\nROLE: Cross-Niche Opportunity Ranking Committee. Compare exactly these four niches: "+json.dumps(NICHES)+". Use ONLY the source records below as evidence. Rank each niche 1-4 and give a transparent 100-point score with criteria: buyer-problem evidence 25, search-intent evidence 20, differentiation/gaps 20, usability/design opportunity 15, production feasibility 10, price evidence 10. For every score explain evidence and confidence. Never infer actual sales from search snippets. Return JSON with executive_summary, ranked_niches (all four), opportunity_hypotheses (ranked 1-8), keyword_clusters, design_patterns_to_test, counter_evidence, missing_data, cheapest_validation_tests, source_limitations. If evidence is weak mark UNKNOWN and lower confidence.\n\nSOURCE RECORDS:\n"+source_prompt(all_sources)
-            with st.spinner("چاروں نِچز کے شواہد کا تقابلی تجزیہ…"):
-                comparison,provider,errs=ask_ai(compare_prompt,cfg)
-            ss.all_niche_sources=all_sources; ss.all_niche_report=comparison; ss.all_niche_provider=provider
-            ss.all_niche_errors=all_errors+errs
-            if comparison:
-                st.success(f"چاروں نِچز کی تقابلی رپورٹ تیار؛ {len(all_sources)} منفرد URLs جمع ہوئے۔")
-                st.markdown(comparison)
-                st.download_button("Download 4-niche ranking report",comparison.encode("utf-8"),file_name="four_niche_opportunity_ranking.txt",key="dl_all_niche_report")
-            else: st.error("AI ranking نہیں بنا سکا؛ provider/model کی جانچ کریں۔")
-
     if st.button("Run evidence-first research",type="primary",use_container_width=True,key="run_research"):
         queries=list(dict.fromkeys(x.strip() for x in [q1,q2,q3]+extra_queries.splitlines() if x.strip()))
         sources=[]; errs=[]
@@ -805,7 +687,7 @@ with tabs[2]:
                 st.download_button("Download prompt",prompt.encode(),file_name=f"design_prompt_{i}.txt",key=f"dl_prompt_{i}")
     else: st.info("پہلے Research مکمل کریں تاکہ چھ prompts اصل تحقیق سے آئیں۔")
     if st.button("Generate Pinterest / social text package",key="gen_pins_text"):
-        ctx={"concepts":concepts[:6],"selected_concept":concepts[min(ss.get("selected_concept_index",0),max(0,len(concepts)-1))] if concepts else {},"seo":ss.seo,"platforms":["Pinterest","Instagram","Facebook","YouTube","TikTok","Reddit","X","WhatsApp Business"],"manual_posting_only":True,"platform_specific_output_required":True,"include_keyword_evidence_and_unknowns":True}
+        ctx={"concepts":concepts[:6],"selected_concept":concepts[min(ss.get("selected_concept_index",0),max(0,len(concepts)-1))] if concepts else {},"seo":ss.seo,"platforms":["Pinterest","Instagram","Facebook","YouTube","TikTok","Reddit","X","WhatsApp Business"],"manual_posting_only":True}
         out,_,_=run_role(ROLE_PINS,ctx)
         if out: ss.pins=out
     if ss.pins:
@@ -835,9 +717,7 @@ with tabs[4]:
     img_prompt=st.text_input("What to draw (English)",placeholder="simple smiling toothbrush icon, no text",key="image_prompt")
     img_style=st.selectbox("Style",["flat vector icon, white background, kid-friendly","soft watercolour, pastel, white background","simple black and white line drawing","3D paper mockup, soft natural shadows, clean Pinterest product scene"],key="image_style")
     img_size=st.selectbox("Image size",["512 x 512","1000 x 1500 (Pinterest pin)"],key="image_size")
-    image_provider_options=["Pollinations (public endpoint)"]+[x["name"] for x in image_cfg]
-    selected_image_provider=st.selectbox("Image provider",image_provider_options,key="image_provider_choice")
-    img_count=st.slider("Number of images (may use API credits)",1,3,1,key="image_count")
+    img_count=st.slider("Number of images (public endpoint may be slow or unavailable)",1,3,1,key="image_count")
     if st.button("Generate image(s)",key="generate_real_images"):
         if not img_prompt.strip(): st.error("پہلے تصویر کا موضوع لکھیں۔")
         else:
@@ -846,12 +726,7 @@ with tabs[4]:
             for i in range(img_count):
                 try:
                     with st.spinner(f"Image {i+1}/{img_count}…"):
-                        final_prompt=f"{img_prompt.strip()}, {img_style}, original artwork, no text, no logo, no brand"
-                        if selected_image_provider == "Pollinations (public endpoint)":
-                            b,ct=pollinations_image(final_prompt,w,h)
-                        else:
-                            selected_cfg=next(x for x in image_cfg if x["name"]==selected_image_provider)
-                            b,ct=openai_compatible_image(final_prompt,selected_cfg["key"],selected_cfg["base"],selected_cfg["model"],w,h)
+                        b,ct=pollinations_image(f"{img_prompt.strip()}, {img_style}, original artwork, no text, no logo, no brand",w,h)
                     made.append({"bytes":b,"content_type":ct,"name":f"image_{i+1}.jpg"})
                     if i<img_count-1: time.sleep(3)
                 except Exception as e:
@@ -871,16 +746,15 @@ with tabs[5]:
     st.caption("Vector PDF layouts؛ منتخب template کی اصل printable فائل بنے گی۔ ہر صفحہ دیکھ کر منظوری دیں۔")
     title=st.text_input("Printable title",value=P.get("pdf_title","Kids Visual Routine Planner"),key="pdf_title")
     template=st.selectbox("Printable template",list(TEMPLATE_NAMES),format_func=lambda x:TEMPLATE_NAMES[x],key="pdf_template")
+    style=st.selectbox("Design style",STYLES,key="pdf_style")
     palette=st.selectbox("Palette",list(PALETTES),key="pdf_palette")
     paper_choice=st.radio("Paper size",["US Letter","A4","Both"],horizontal=True,key="pdf_paper")
     low_ink=st.checkbox("Also create low-ink version",value=True,key="pdf_low_ink")
     include_instructions=st.checkbox("Include buyer instructions in ZIP",value=True,key="pdf_instructions")
     default_data={
         "routine_chart":{"tasks":[{"time":"Morning","task":"Get ready"},{"time":"Before school","task":"Pack my things"},{"time":"Evening","task":"Prepare for tomorrow"}]},
-        "bedtime_routine":{"tasks":[{"time":"1","task":"Put toys away"},{"time":"2","task":"Put on pajamas"},{"time":"3","task":"Brush teeth"},{"time":"4","task":"Choose a book"},{"time":"5","task":"Quiet time"}]},
-        "transition_cards":{"cards":[{"label":"FIRST: Finish this activity"},{"label":"THEN: Choose next activity"},{"label":"2-minute warning"},{"label":"Clean up together"},{"label":"Take a short break"},{"label":"Ask for help"}]},
         "weekly_chart":{"tasks":["Get ready","Brush teeth","Get dressed","Pack my things","Start homework","Put items away"],"reward":"Choose a small reward together."},
-        "brain_dump":{},"priority_list":{},"feelings_corner":{},"cards":{"cards":[{"label":"GET READY"},{"label":"BRUSH TEETH"},{"label":"PACK BAG"},{"label":"TAKE A BREAK"},{"label":"HOMEWORK"},{"label":"BEDTIME"}]},"labels":{"labels":["Morning","School","Homework","Break","Evening","Bedtime"]}}
+        "brain_dump":{},"priority_list":{},"feelings_corner":{},"transition_cards":{},"bedtime_routine":{},"behaviour_board":{},"cards":{"cards":[{"label":"GET READY"},{"label":"BRUSH TEETH"},{"label":"PACK BAG"},{"label":"TAKE A BREAK"},{"label":"HOMEWORK"},{"label":"BEDTIME"}]},"labels":{"labels":["Morning","School","Homework","Break","Evening","Bedtime"]}}
     st.text_area("Optional template content JSON (advanced)",value=json.dumps(default_data[template],ensure_ascii=False,indent=2),height=170,key="pdf_data_json")
     if st.button("Build PDF(s)",type="primary",key="build_pdfs"):
         try:
@@ -889,10 +763,10 @@ with tabs[5]:
             papers=["US Letter","A4"] if paper_choice=="Both" else [paper_choice]
             made={}
             for pp in papers:
-                b=make_pdf(title,template,dat,pp,palette,False,logo_bytes,logo_pos)
+                b=make_pdf(title,template,dat,pp,palette,False,logo_bytes,logo_pos,style)
                 made[f"{safe_name(title)}_{pp.replace(' ','')}.pdf"]=b
                 if low_ink:
-                    bi=make_pdf(title+" — Low Ink",template,dat,pp,palette,True,logo_bytes,logo_pos)
+                    bi=make_pdf(title+" — Low Ink",template,dat,pp,palette,True,logo_bytes,logo_pos,style)
                     made[f"{safe_name(title)}_{pp.replace(' ','')}_LowInk.pdf"]=bi
             ss.pdfs=made; ss.zip_bytes=None; log(f"PDF build: {len(made)} files")
             st.success(f"{len(made)} PDF فائلیں تیار ہوئیں؛ اب QA چیک دیکھیں اور خود صفحے کا جائزہ لیں۔")
@@ -945,14 +819,14 @@ with tabs[6]:
 
 with tabs[7]:
     st.subheader("Project save / load")
-    save={"version":VERSION,"project":P,"sources":ss.sources,"research_raw":ss.research_raw,"research_json":ss.research_json,"research_report":ss.research_report,"trend":ss.trend,"decision":ss.decision,"seo":ss.seo,"spec":ss.spec,"pins":ss.pins,"qc":ss.qc,"results_log":ss.results_log,"all_niche_report":ss.get("all_niche_report",""),"all_niche_sources":ss.get("all_niche_sources",[])}
+    save={"version":VERSION,"project":P,"sources":ss.sources,"research_raw":ss.research_raw,"research_json":ss.research_json,"research_report":ss.research_report,"trend":ss.trend,"decision":ss.decision,"seo":ss.seo,"spec":ss.spec,"pins":ss.pins,"qc":ss.qc,"results_log":ss.results_log}
     st.download_button("Save project JSON",json.dumps(save,ensure_ascii=False,indent=2).encode(),file_name="business_factory_project.json",mime="application/json",key="save_project")
     upload=st.file_uploader("Load saved project JSON",type=["json"],key="load_project")
     if upload and st.button("Load project",key="load_project_button"):
         try:
             loaded=json.loads(upload.getvalue().decode("utf-8")); project=loaded.get("project",{})
             if isinstance(project,dict): P.update({k:v for k,v in project.items() if k in ["brand","niche","market","platform","audience","goal","owner_evidence"]})
-            for k in ["sources","research_raw","research_json","research_report","trend","decision","seo","spec","pins","qc","results_log","all_niche_report","all_niche_sources"]:
+            for k in ["sources","research_raw","research_json","research_report","trend","decision","seo","spec","pins","qc","results_log"]:
                 if k in loaded: ss[k]=loaded[k]
             st.success("Project loaded into this session. If select boxes do not reflect every changed field, reload the app page once.")
         except Exception as e: st.error("Project file could not be loaded: "+str(e))
