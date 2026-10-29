@@ -1,12 +1,13 @@
 """
 Business Factory v3 - one file.
-Flow: 1 Research (one button) > 2 Four designs (+ optional screenshots) > 3 Build PDF / PNG / Pinterest pin > QC > owner approval > ZIP.
+Tabs: 1 Research > 2 Screenshots > 3 Four designs > 4 Chat (instructions) > 5 Build and export > 6 History.
+Every successful stage is saved to business_factory.db next to this file. Old saves can be opened again in History.
 Install: pip install "streamlit>=1.36" requests pillow pypdfium2
 Optional: pip install pytrends   (unofficial Google Trends)
-Fonts: put DejaVuSans.ttf and DejaVuSans-Bold.ttf in a folder named fonts/ next to this file.
-Secrets (optional): GEMINI_KEY_1..3, GEMINI_MODEL, GEMINI_IMAGE_MODEL, GROQ_KEY, GROQ_MODEL,
-                    OPENROUTER_KEY, OPENROUTER_MODEL, CUSTOM_BASE, CUSTOM_KEY, CUSTOM_MODEL,
-                    TAVILY_KEY, ETSY_KEY, BRAND_NAME, LOGO_B64
+Fonts: fonts/DejaVuSans.ttf and fonts/DejaVuSans-Bold.ttf next to this file.
+Secrets (optional): GEMINI_KEY_1..3, GEMINI_MODEL, GEMINI_IMAGE_MODELS (one per line or comma separated),
+                    TOGETHER_KEY, GROQ_KEY, GROQ_MODEL, OPENROUTER_KEY, OPENROUTER_MODEL, CUSTOM_BASE, CUSTOM_KEY,
+                    CUSTOM_MODEL, TAVILY_KEY, ETSY_KEY, BRAND_NAME, LOGO_B64
 """
 import base64
 import hashlib
@@ -16,8 +17,11 @@ import math
 import os
 import random
 import re
+import sqlite3
 import time
+import uuid
 import zipfile
+from contextlib import closing
 from datetime import datetime
 
 import pypdfium2 as pdfium
@@ -29,6 +33,17 @@ st.set_page_config(page_title="Business Factory v3", layout="centered")
 
 SCHEMA = 3
 HERE = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(HERE, "business_factory.db")
+MAX_SHOTS = 15
+GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta"
+TOGETHER_URL = "https://api.together.xyz/v1/images/generations"
+DEFAULT_IMAGE_MODELS = "\n".join([
+    "imagen-3.0-generate-002",
+    "gemini-3.1-flash-image",
+    "imagen-3.0-fast-generate-001",
+    "black-forest-labs/FLUX.1-schnell",
+    "gemini-2.5-flash-image",
+])
 HEX = re.compile(r"^#[0-9A-Fa-f]{6}$")
 RISKY_RE = re.compile(r"\b(cures?|treats?|treatment|diagnos\w*|therap\w*|guarantee\w*|best ?sellers?|fixes|medical)\b", re.I)
 DAYS = ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"]
@@ -59,7 +74,7 @@ README = ("Made with Business Factory v3.\n"
           "Check every file yourself. Read the current rules of Gumroad and Pinterest for children's products "
           "before you publish. Upload and post manually.\n")
 
-# ============================ AI RULES (the prompts) ============================
+# ============================ AI RULES (prompts) ============================
 RESEARCH_RULES = """You are a careful market researcher for one owner who sells printable PDFs for children on Gumroad and Pinterest.
 Use ONLY the EVIDENCE list and owner notes. Each keyword, gap and pattern must name the evidence id that supports it (E1, O1...), or null if it is your own idea (GUESS).
 Never invent search volumes, prices, sales, rankings, trends or URLs. Put anything you could not verify in "unknowns".
@@ -102,9 +117,18 @@ Rules:
 - note: one short Urdu sentence on what this design uses from the research or screenshots, or "GUESS" if not supported by evidence.
 No medical claims. No brand, character or copyrighted names. No emojis. No day names in rows."""
 
-REVISE_ONE = """You revise ONE printable design using the owner's instruction.
-Change only what the instruction asks. Keep the same template and style. Keep all rules: English product text, #RRGGBB colours, no medical claims, no emojis, no day names in rows, never the word FREE.
-Return ONLY one JSON object with the same keys as the design you receive, no other text."""
+CHAT_RULES = """You are the assistant inside Business Factory for one owner who sells printable PDFs for children.
+The owner talks in Urdu or English, often dictated (speech errors are possible). Understand the meaning.
+You get the OWNER TARGET (All designs, or one design number), the CURRENT DESIGNS and a RESEARCH DIGEST.
+Return ONLY valid JSON, no other text:
+{"reply":"short answer to the owner in simple Urdu","changes":[{"index":0,"design":{"style":"","template":"","title":"","subtitle":"","palette":{"bg":"#RRGGBB","accent":"#RRGGBB","text":"#RRGGBB","box":"#RRGGBB","soft":"#RRGGBB"},"rows":[],"sections":[],"headline":"","cta":"","footer":"","art_prompt":"","full_prompt":"","note":""}}]}
+Rules:
+- Change ONLY what the owner asked for. Only designs inside OWNER TARGET may appear in "changes". index 0 is Design 1.
+- If the owner only asks a question, or the designs already do what is asked, return "changes": [] and answer in "reply".
+- A changed design keeps its style and template. Keep the same rules: English product text, #RRGGBB colours, text readable on every surface, no medical or guaranteed-result claims, no emojis, no day names in rows, the word FREE only with a real free file.
+- Weekly chart rows are task names only. Routine rows use "7:00 Wake up". First-then rows use "First | Then".
+- Do not invent research facts, prices, sales or rankings. If the owner asks for one that is not in the research, say so in "reply".
+- "note" is one short Urdu sentence saying what changed and why."""
 
 
 # ============================ HELPERS ============================
@@ -151,6 +175,10 @@ def as_dict(x):
     return x if isinstance(x, dict) else {}
 
 
+def parse_models(txt):
+    return [x.strip() for x in re.split(r"[\n,]+", txt or "") if x.strip()][:10]
+
+
 def as_rows(raw):
     out = []
     for x in as_list(raw):
@@ -193,7 +221,7 @@ def ink_on(bg):
 
 
 def fix_palette(pal):
-    """Keep the design's text colour if it is readable on every surface; otherwise use black or white."""
+    """Keep the design's text colour if it reads on every surface; otherwise use black or white."""
     surfaces = (pal["bg"], pal["box"], pal["soft"])
 
     def score(c):
@@ -246,7 +274,7 @@ def wrap(text, f, max_w):
 
 
 def fit_block(text, max_w, max_h, size, bold, min_size):
-    """Shrink text until it fits the box. Returns (size, lines, fits)."""
+    """Shrink text until it fits its box. Returns (size, lines, fits)."""
     text = ascii_text(text, 240) or " "
     s, lo = int(size), int(min_size)
     while True:
@@ -278,7 +306,7 @@ def star(dr, cx, cy, r, fill, outline):
     dr.polygon(pts, fill=fill, outline=outline)
 
 
-def checkbox(dr, cx, cy, s, fill, outline, w):
+def checkbox_shape(dr, cx, cy, s, fill, outline, w):
     dr.rounded_rectangle([cx - s / 2, cy - s / 2, cx + s / 2, cy + s / 2],
                          radius=max(1, int(s * 0.2)), fill=fill, outline=outline, width=w)
 
@@ -343,11 +371,15 @@ def normalize_design(raw, style, template):
     }
 
 
+# ============================ PROJECT DATA AND SAVES ============================
+SAVE_FIELDS = ["id", "name", "niche", "sub", "market", "created", "notes", "evidence", "research",
+               "research_at", "research_key", "screens", "designs", "chat"]
+
+
 def new_project(name, niche, sub, market):
-    return {"schema": SCHEMA, "id": hashlib.sha1(f"{name}{time.time()}".encode()).hexdigest()[:10],
-            "name": name, "niche": niche, "sub": sub, "market": market, "created": now_iso(),
-            "notes": "", "evidence": [], "research": None, "research_at": "", "research_key": "",
-            "screens": {}, "designs": []}
+    return {"schema": SCHEMA, "id": uuid.uuid4().hex[:12], "name": name, "niche": niche, "sub": sub,
+            "market": market, "created": now_iso(), "notes": "", "evidence": [], "research": None,
+            "research_at": "", "research_key": "", "screens": {}, "designs": [], "chat": []}
 
 
 def research_key(*parts):
@@ -395,33 +427,26 @@ def zip_bytes(files):
     return buf.getvalue()
 
 
-SAVE_FIELDS = ["schema", "id", "name", "niche", "sub", "market", "created", "notes", "evidence",
-               "research", "research_at", "research_key", "screens", "designs"]
+def snapshot_dict(proj):
+    d = {k: proj.get(k) for k in SAVE_FIELDS}  # never includes API keys or picture bytes
+    d["schema"] = SCHEMA
+    return d
 
 
-def backup_bytes(proj):
-    data = {k: proj.get(k) for k in SAVE_FIELDS}  # never includes API keys or picture bytes
-    data["schema"], data["saved"] = SCHEMA, now_iso()
-    return json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
-
-
-def restore_project(raw):
-    if len(raw) > 3_000_000:
-        raise ValueError("backup file is too large")
-    obj = json.loads(raw.decode("utf-8"))
+def project_from_obj(obj):
     if not isinstance(obj, dict):
-        raise ValueError("not a project file")
+        raise ValueError("not a project save")
     ver = obj.get("schema", 1)
     if not isinstance(ver, int) or ver > SCHEMA:
-        raise ValueError("this backup is from a newer app version")
+        raise ValueError("saved by a newer app version")
     niche = obj.get("niche") if obj.get("niche") in NICHES else list(NICHES)[0]
     sub = obj.get("sub") if obj.get("sub") in NICHES[niche] else list(NICHES[niche])[0]
     market = obj.get("market") if obj.get("market") in MARKETS else "USA"
     p = new_project(ascii_text(obj.get("name"), 60) or "Restored project", niche, sub, market)
-    p["id"] = safe_name(obj.get("id", p["id"]))
+    p["id"] = safe_name(obj.get("id") or p["id"])[:40]
     p["created"] = str(obj.get("created", p["created"]))[:20]
     p["notes"] = str(obj.get("notes", ""))[:3000]
-    p["evidence"] = [e for e in as_list(obj.get("evidence")) if isinstance(e, dict)][:60]
+    p["evidence"] = [e for e in as_list(obj.get("evidence")) if isinstance(e, dict)][:80]
     p["research"] = obj["research"] if isinstance(obj.get("research"), dict) else None
     p["research_at"] = str(obj.get("research_at", ""))[:20]
     p["research_key"] = str(obj.get("research_key", ""))[:64]
@@ -429,9 +454,79 @@ def restore_project(raw):
     template = NICHES[niche][sub]
     p["designs"] = [normalize_design(d, STYLES[i], template)
                     for i, d in enumerate(as_list(obj.get("designs"))[:4]) if isinstance(d, dict)]
+    p["chat"] = [{"role": str(m.get("role", ""))[:10], "text": str(m.get("text", ""))[:1500]}
+                 for m in as_list(obj.get("chat"))[-40:] if isinstance(m, dict)]
     return p
 
 
+def backup_bytes(proj):
+    data = snapshot_dict(proj)
+    data["saved"] = now_iso()
+    return json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
+
+
+def restore_project_bytes(raw):
+    if len(raw) > 3_000_000:
+        raise ValueError("backup file is too large")
+    return project_from_obj(json.loads(raw.decode("utf-8")))
+
+
+def db_connect():
+    con = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=10)
+    con.execute("""CREATE TABLE IF NOT EXISTS snapshots (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL, name TEXT,
+        label TEXT, saved_at TEXT, data TEXT NOT NULL)""")
+    con.execute("CREATE INDEX IF NOT EXISTS ix_snap_project ON snapshots(project_id, id)")
+    con.commit()
+    return con
+
+
+def save_snapshot(proj, label):
+    """Save the whole project (research, screenshot notes, designs, chat). Returns (ok, time or error)."""
+    try:
+        data = json.dumps(snapshot_dict(proj), ensure_ascii=False)
+        stamp = now_iso()
+        with closing(db_connect()) as con:
+            con.execute("INSERT INTO snapshots (project_id, name, label, saved_at, data) VALUES (?,?,?,?,?)",
+                        (proj["id"], proj["name"], label, stamp, data))
+            con.commit()
+        return True, stamp
+    except Exception as e:
+        return False, mask(e)
+
+
+def list_projects():
+    with closing(db_connect()) as con:
+        return con.execute("""SELECT project_id, name, saved_at, label FROM snapshots
+            WHERE id IN (SELECT MAX(id) FROM snapshots GROUP BY project_id)
+            ORDER BY id DESC LIMIT 100""").fetchall()
+
+
+def list_snapshots(pid):
+    with closing(db_connect()) as con:
+        return con.execute("SELECT id, saved_at, label FROM snapshots WHERE project_id=? ORDER BY id DESC LIMIT 100",
+                           (pid,)).fetchall()
+
+
+def load_snapshot_data(sid):
+    with closing(db_connect()) as con:
+        row = con.execute("SELECT data FROM snapshots WHERE id=?", (sid,)).fetchone()
+    return row[0] if row else None
+
+
+def latest_snapshot_id(pid):
+    with closing(db_connect()) as con:
+        row = con.execute("SELECT id FROM snapshots WHERE project_id=? ORDER BY id DESC LIMIT 1", (pid,)).fetchone()
+    return row[0] if row else None
+
+
+def delete_snapshot(sid):
+    with closing(db_connect()) as con:
+        con.execute("DELETE FROM snapshots WHERE id=?", (sid,))
+        con.commit()
+
+
+# ============================ CHECKS ============================
 def wording(texts, freebie_ok):
     low = " ".join(texts)
     hits = sorted({m.group(0).lower() for m in RISKY_RE.finditer(low)})
@@ -462,7 +557,7 @@ def png_check(data, W, H):
         return "PNG file", "FAIL", "cannot open PNG: " + mask(e)
 
 
-# ============================ AI AND EVIDENCE CALLS ============================
+# ============================ AI, IMAGE AND EVIDENCE CALLS ============================
 class LLMError(Exception):
     pass
 
@@ -476,6 +571,15 @@ def post_retry(url, method="POST", **kw):
     return r
 
 
+def http_error(r, secret_list):
+    hint = ""
+    if r.status_code == 404:
+        hint = " (model name not found or not available for this key)"
+    elif r.status_code in (401, 403):
+        hint = " (key rejected or no access to this model)"
+    return f"HTTP {r.status_code}{hint}: {mask(r.text, secret_list)}"
+
+
 def gemini_call(key, model, system, user, images=(), json_mode=True):
     parts = [{"text": user}]
     for mime, data in images:
@@ -485,7 +589,7 @@ def gemini_call(key, model, system, user, images=(), json_mode=True):
         gen["responseMimeType"] = "application/json"
     body = {"system_instruction": {"parts": [{"text": system}]},
             "contents": [{"role": "user", "parts": parts}], "generationConfig": gen}
-    r = post_retry(f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+    r = post_retry(f"{GEMINI_BASE}/models/{model}:generateContent",
                    headers={"x-goog-api-key": key, "Content-Type": "application/json"}, json=body, timeout=180)
     if r.status_code != 200:
         raise LLMError(f"Gemini HTTP {r.status_code}: {mask(r.text, [key])}")
@@ -497,43 +601,6 @@ def gemini_call(key, model, system, user, images=(), json_mode=True):
     if not text.strip():
         raise LLMError("Gemini gave an empty reply")
     return text
-
-
-def gemini_art(cfg, prompt):
-    """Decorative picture from the Gemini image model. Returns PNG bytes or raises LLMError."""
-    key = next((k for k in cfg["gem_keys"] if k), "")
-    model = cfg.get("img_model", "").strip()
-    if not key:
-        raise LLMError("no Gemini key entered")
-    if not model:
-        raise LLMError("no Gemini image model name entered")
-    text = ("Square flat vector illustration for a children's printable header. Original art only. "
-            "Friendly, simple, plain light background. No text, no letters, no numbers, no logo, "
-            "no watermark, no characters from existing brands. Subject: " + prompt)[:1000]
-    body = {
-        "contents": [{"parts": [{"text": text}]}],
-        "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]},
-    }
-    r = post_retry(f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
-                   headers={"x-goog-api-key": key, "Content-Type": "application/json"}, json=body, timeout=180)
-    if r.status_code != 200:
-        hint = " (model name not found: press 'List my Gemini models')" if r.status_code == 404 else ""
-        raise LLMError(f"Gemini image HTTP {r.status_code}{hint}: {mask(r.text, cfg['keys'])}")
-    try:
-        parts = r.json()["candidates"][0]["content"]["parts"]
-    except Exception:
-        raise LLMError("Gemini image gave no picture (blocked or empty)")
-    for p in parts:
-        inline = p.get("inlineData") or p.get("inline_data")
-        if inline and inline.get("data"):
-            im = Image.open(io.BytesIO(base64.b64decode(inline["data"])))
-            im.load()
-            if min(im.size) < 256:
-                raise LLMError("Gemini picture is too small")
-            buf = io.BytesIO()
-            im.convert("RGB").save(buf, "PNG")
-            return buf.getvalue()
-    raise LLMError("Gemini reply had no image part")
 
 
 def openai_call(base, key, model, system, user):
@@ -554,12 +621,129 @@ def openai_call(base, key, model, system, user):
 
 
 def gemini_models(key):
-    r = requests.get("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200",
-                     headers={"x-goog-api-key": key}, timeout=30)
+    r = requests.get(f"{GEMINI_BASE}/models?pageSize=200", headers={"x-goog-api-key": key}, timeout=30)
     if r.status_code != 200:
         raise LLMError(f"HTTP {r.status_code}: {mask(r.text, [key])}")
     return sorted(m["name"].split("/")[-1] for m in r.json().get("models", [])
                   if "generateContent" in m.get("supportedGenerationMethods", []))
+
+
+# ---- image models: three different API routes, chosen by model name
+IMG_PROMPT_PREFIX = ("Square flat vector illustration for a children's printable header. Original art only. "
+                     "Friendly, simple, plain light background. No text, no letters, no numbers, no logo, "
+                     "no watermark, no characters from existing brands. Subject: ")
+
+
+def image_prompt(prompt):
+    return (IMG_PROMPT_PREFIX + str(prompt))[:1000]
+
+
+def image_kind(model):
+    m = model.lower()
+    if m.startswith("imagen-"):
+        return "imagen"
+    if m.startswith("black-forest-labs/") or "flux" in m:
+        return "together"
+    return "gemini"
+
+
+def check_picture(raw):
+    im = Image.open(io.BytesIO(raw))
+    im.load()
+    if min(im.size) < 256:
+        raise LLMError("picture is too small")
+    buf = io.BytesIO()
+    im.convert("RGB").save(buf, "PNG")
+    return buf.getvalue()
+
+
+def gemini_image_generate(key, model, text, secret_list):
+    """Gemini models that return an image inside generateContent (for example gemini-2.5-flash-image)."""
+    body = {"contents": [{"parts": [{"text": text}]}],
+            "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]}}
+    r = post_retry(f"{GEMINI_BASE}/models/{model}:generateContent",
+                   headers={"x-goog-api-key": key, "Content-Type": "application/json"}, json=body, timeout=180)
+    if r.status_code != 200:
+        raise LLMError(http_error(r, secret_list))
+    try:
+        parts = r.json()["candidates"][0]["content"]["parts"]
+    except Exception:
+        raise LLMError("no picture in reply (blocked or empty)")
+    for p in parts:
+        inline = p.get("inlineData") or p.get("inline_data")
+        if inline and inline.get("data"):
+            return check_picture(base64.b64decode(inline["data"]))
+    raise LLMError("reply had no image part")
+
+
+def imagen_generate(key, model, text, secret_list):
+    """Imagen models use the predict route, not generateContent."""
+    body = {"instances": [{"prompt": text}],
+            "parameters": {"sampleCount": 1, "aspectRatio": "1:1"}}
+    r = post_retry(f"{GEMINI_BASE}/models/{model}:predict",
+                   headers={"x-goog-api-key": key, "Content-Type": "application/json"}, json=body, timeout=180)
+    if r.status_code != 200:
+        raise LLMError(http_error(r, secret_list))
+    try:
+        preds = r.json().get("predictions", [])
+    except Exception:
+        raise LLMError("unexpected Imagen reply")
+    for p in preds:
+        if isinstance(p, dict) and p.get("bytesBase64Encoded"):
+            return check_picture(base64.b64decode(p["bytesBase64Encoded"]))
+    raise LLMError("reply had no image (the model may have filtered the prompt)")
+
+
+def together_image_generate(key, model, text, secret_list):
+    """FLUX models hosted by Together AI (OpenAI-style images endpoint)."""
+    steps = 4 if "schnell" in model.lower() else 28
+    body = {"model": model, "prompt": text, "width": 1024, "height": 1024,
+            "steps": steps, "n": 1, "response_format": "b64_json"}
+    r = post_retry(TOGETHER_URL, headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                   json=body, timeout=180)
+    if r.status_code != 200:
+        raise LLMError(http_error(r, secret_list))
+    try:
+        data = r.json().get("data", [])
+    except Exception:
+        raise LLMError("unexpected Together reply")
+    if data and isinstance(data[0], dict):
+        if data[0].get("b64_json"):
+            return check_picture(base64.b64decode(data[0]["b64_json"]))
+        if data[0].get("url"):
+            rr = requests.get(data[0]["url"], timeout=120)
+            if rr.status_code == 200:
+                return check_picture(rr.content)
+    raise LLMError("reply had no image")
+
+
+def image_once(cfg, model, prompt):
+    """One picture from one model. Returns PNG bytes or raises LLMError."""
+    text = image_prompt(prompt)
+    kind = image_kind(model)
+    if kind == "together":
+        if not cfg["together"]:
+            raise LLMError("this FLUX model needs a Together key (TOGETHER_KEY)")
+        return together_image_generate(cfg["together"], model, text, cfg["keys"])
+    key = next((k for k in cfg["gem_keys"] if k), "")
+    if not key:
+        raise LLMError("no Gemini key entered")
+    if kind == "imagen":
+        return imagen_generate(key, model, text, cfg["keys"])
+    return gemini_image_generate(key, model, text, cfg["keys"])
+
+
+def gemini_art(cfg, prompt):
+    """Try the owner's image models in order. Returns (PNG bytes, model name)."""
+    if not cfg["img_models"]:
+        raise LLMError("no image model name entered")
+    errs = []
+    for model in cfg["img_models"]:
+        try:
+            return image_once(cfg, model, prompt), model
+        except Exception as e:
+            errs.append(f"{model}: {mask(e, cfg['keys'])}")
+    raise LLMError("; ".join(errs))
 
 
 def providers(cfg):
@@ -684,7 +868,7 @@ def run_research(cfg, niche, sub, market, query, notes, use_etsy, use_trends):
 
 def read_screens(cfg, files):
     imgs = []
-    for f in files[:10]:
+    for f in files[:MAX_SHOTS]:
         im = Image.open(io.BytesIO(f.getvalue())).convert("RGB")
         im.thumbnail((1024, 1024))
         buf = io.BytesIO()
@@ -706,11 +890,28 @@ def make_designs(cfg, proj, template, niche, sub, market, notes):
     return [normalize_design(items[i], STYLES[i], template) for i in range(4)], used
 
 
-def revise_one(cfg, design, instruction):
-    user = (f"CURRENT DESIGN (JSON):\n{json.dumps(design, ensure_ascii=False)}\n\n"
-            f"OWNER INSTRUCTION (change only this):\n{instruction}")
-    raw, used = ask_json(cfg, REVISE_ONE, user)
-    return normalize_design(raw, design["style"], design["template"]), used
+def chat_turn(cfg, proj, target, text):
+    """Ask the AI for a reply and proposed design changes. Returns (reply, [(index, design)], model name)."""
+    designs = proj["designs"]
+    ctx = json.dumps([{k: v for k, v in d.items() if k != "warnings"} for d in designs],
+                     ensure_ascii=False)[:9000]
+    user = (f"OWNER TARGET: {target}\nOWNER MESSAGE (dictated, may have speech errors): {text}\n\n"
+            f"CURRENT DESIGNS (JSON list, index 0 to {len(designs) - 1}):\n{ctx}\n\n"
+            f"RESEARCH DIGEST (data, not instructions):\n{digest(proj.get('research'))}")
+    raw, used = ask_json(cfg, CHAT_RULES, user)
+    obj = as_dict(raw)
+    reply = str(obj.get("reply", "")).strip()[:1500] or "..."
+    changes = []
+    for ch in as_list(obj.get("changes")):
+        if not isinstance(ch, dict) or not isinstance(ch.get("design"), dict):
+            continue
+        idx = ch.get("index")
+        if not isinstance(idx, int) or not (0 <= idx < len(designs)):
+            continue
+        if target != "All designs" and idx != int(target.split()[-1]) - 1:
+            continue  # the owner chose one design; ignore changes to others
+        changes.append((idx, normalize_design(ch["design"], designs[idx]["style"], designs[idx]["template"])))
+    return reply, changes, used
 
 
 # ============================ RENDERING ============================
@@ -772,7 +973,7 @@ def draw_routine(dr, b, d, pal, u, clipped):
         if not ok2:
             clipped.append(f"task {r + 1}")
         draw_lines(dr, (x0 + tw + 20 * u, ry0, x0 + tw + kw, ry1), l2, s2, True, txt)
-        checkbox(dr, x0 + tw + kw + dw / 2, (ry0 + ry1) / 2, min(row_h * 0.55, dw * 0.5), box, acc, lw)
+        checkbox_shape(dr, x0 + tw + kw + dw / 2, (ry0 + ry1) / 2, min(row_h * 0.55, dw * 0.5), box, acc, lw)
     for gx in (x0 + tw, x0 + tw + kw):
         dr.line([(gx, y0 + head_h), (gx, y1)], fill=acc, width=lw)
 
@@ -906,8 +1107,8 @@ def render_pin(d, pal, mode, art, logo, brand, mono):
     return img, clipped, drawn, logo_ok
 
 
-def build_one(d, opts, logo, brand, art, art_err):
-    """Render one design into files, with QC checks."""
+def build_one(d, opts, logo, brand, art, art_info):
+    """Render one design into files, with QC checks. art_info says which picture model was used, or why none was added."""
     paper, output, mono, mode = opts["paper"], opts["output"], opts["mono"], opts["mode"]
     is_pin = paper.startswith("Pinterest")
     W, H, dpi = FORMATS[paper]
@@ -922,9 +1123,10 @@ def build_one(d, opts, logo, brand, art, art_err):
     else:
         checks.append(("Text contrast", "PASS", "readable on all surfaces"))
     if art:
-        checks.append(("AI picture", "WARNING", "decorative only; check it has no text, letters or watermark"))
-    elif art_err:
-        checks.append(("AI picture", "WARNING", "not added: " + art_err))
+        checks.append(("AI picture", "WARNING",
+                       f"decorative only ({art_info}); check it has no text, letters or watermark"))
+    elif art_info:
+        checks.append(("AI picture", "WARNING", art_info))
     if is_pin and output == "PDF":
         checks.append(("Format", "WARNING", "pins are saved as PNG"))
     if is_pin:
@@ -976,15 +1178,60 @@ def build_one(d, opts, logo, brand, art, art_err):
     return {"status": status, "checks": checks, "files": files, "preview": prev}
 
 
-# ============================ UI ============================
+# ============================ SESSION ============================
 ss = st.session_state
 ss.setdefault("builds", {})
 ss.setdefault("zip", None)
-if "proj" not in ss:
-    first = list(NICHES)[0]
-    ss.update(proj=new_project("My printable", first, list(NICHES[first])[0], "USA"),
-              niche=first, sub=list(NICHES[first])[0], market="USA")
-    ss["pname"] = ss["proj"]["name"]
+ss.setdefault("pending", None)
+
+
+def load_into_session(p):
+    ss["proj"] = p
+    ss["niche"], ss["sub"], ss["market"], ss["pname"] = p["niche"], p["sub"], p["market"], p["name"]
+    ss["builds"] = {}
+    ss["zip"] = None
+    ss["pending"] = None
+    for i in range(4):
+        ss.pop(f"ok{i}", None)
+
+
+def checkpoint(label):
+    return save_snapshot(ss["proj"], label)
+
+
+def open_snapshot(sid):
+    try:
+        raw = load_snapshot_data(sid)
+        if not raw:
+            ss["flash"] = ("error", "This save was not found.")
+            return
+        load_into_session(project_from_obj(json.loads(raw)))
+        ss["flash"] = ("success", f"Opened: {ss['proj']['name']}")
+    except Exception as e:
+        ss["flash"] = ("error", "Could not open this save: " + mask(e))
+
+
+def open_project(pid):
+    sid = latest_snapshot_id(pid)
+    if sid:
+        open_snapshot(sid)
+    else:
+        ss["flash"] = ("warning", "No saves for this project.")
+
+
+def delete_snapshot_cb(sid):
+    try:
+        delete_snapshot(sid)
+        ss["flash"] = ("success", "Save deleted.")
+    except Exception as e:
+        ss["flash"] = ("error", "Delete failed: " + mask(e))
+
+
+def new_project_cb():
+    p = new_project("My printable", ss["niche"], ss["sub"], ss["market"])
+    load_into_session(p)
+    ok, info = save_snapshot(p, "New project")
+    ss["flash"] = ("success", f"New project started ({info})") if ok else ("warning", f"New project not saved: {info}")
 
 
 def do_restore():
@@ -993,14 +1240,40 @@ def do_restore():
         ss["flash"] = ("error", "Choose a backup file first.")
         return
     try:
-        p = restore_project(up.getvalue())
+        p = restore_project_bytes(up.getvalue())
     except Exception as e:
         ss["flash"] = ("error", "Restore failed: " + mask(e))
         return
-    ss.update(proj=p, niche=p["niche"], sub=p["sub"], market=p["market"], pname=p["name"], builds={}, zip=None)
-    for i in range(4):
-        ss.pop(f"ok{i}", None)
-    ss["flash"] = ("success", f"Restored: {p['name']}")
+    load_into_session(p)
+    ok, info = save_snapshot(p, "Restored backup")
+    ss["flash"] = ("success", f"Restored: {p['name']}") if ok else ("warning", f"Restored but not saved: {info}")
+
+
+def apply_pending():
+    pend = ss.get("pending")
+    if not pend:
+        return
+    proj = ss["proj"]
+    for idx, nd in pend["changes"]:
+        proj["designs"][idx] = nd
+        ss["builds"].pop(idx, None)
+        ss.pop(f"ok{idx}", None)
+    names = ", ".join(f"Design {i + 1}" for i, _ in pend["changes"])
+    proj["chat"] = (proj["chat"] + [{"role": "assistant", "text": f"Applied changes to: {names}"}])[-40:]
+    ss["pending"] = None
+    ok, info = save_snapshot(proj, "Chat change applied")
+    ss["flash"] = ("success", f"Applied to {names}. Saved at {info}") if ok else \
+        ("warning", f"Applied to {names}, but not saved: {info}")
+
+
+def discard_pending():
+    ss["pending"] = None
+    ss["flash"] = ("info", "Proposed changes discarded. Designs are unchanged.")
+
+
+if "proj" not in ss:
+    first = list(NICHES)[0]
+    load_into_session(new_project("My printable", first, list(NICHES[first])[0], "USA"))
 
 
 def logo_from_secret():
@@ -1028,14 +1301,17 @@ def show_research(r):
         st.caption("Not found in evidence: " + "; ".join(str(x) for x in unk))
 
 
-# ---- sidebar: keys and settings
+# ============================ SIDEBAR ============================
 with st.sidebar:
     st.header("Keys and settings")
-    st.caption("Keys stay in this browser session. For a private app, put them in Streamlit secrets.")
-    gem_model = st.text_input("Gemini text model name", value=secret("GEMINI_MODEL", "gemini-2.5-flash"))
-    img_model = st.text_input("Gemini image model name", value=secret("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image"))
+    st.caption("Keys are kept only in this browser session. For a private app, use Streamlit secrets.")
+    gem_model = st.text_input("Gemini text model", value=secret("GEMINI_MODEL", "gemini-2.5-flash"))
+    img_txt = st.text_area("Image models (one per line, tried in order)",
+                           value=secret("GEMINI_IMAGE_MODELS", DEFAULT_IMAGE_MODELS), height=150)
     gem_keys = [st.text_input(f"Gemini key {i}", type="password", value=secret(f"GEMINI_KEY_{i}")).strip()
                 for i in (1, 2, 3)]
+    together_key = st.text_input("Together key (only for FLUX models)", type="password",
+                                 value=secret("TOGETHER_KEY")).strip()
     if st.button("List my Gemini models"):
         key = next((k for k in gem_keys if k), "")
         if not key:
@@ -1058,11 +1334,11 @@ with st.sidebar:
     logo_up = st.file_uploader("Your logo (used as it is)", type=["png", "jpg", "jpeg"], key="logo_up")
     logo_bytes = logo_up.getvalue() if logo_up else logo_from_secret()
 
-cfg = {"gem_keys": gem_keys, "gem_model": gem_model.strip(), "img_model": img_model.strip(),
-       "groq_key": groq_key, "groq_model": groq_model.strip(), "or_key": or_key, "or_model": or_model.strip(),
-       "cus_base": cus_base.strip(), "cus_key": cus_key, "cus_model": cus_model.strip(),
-       "tavily": tav_key, "etsy": etsy_key, "brand": brand, "logo": logo_bytes}
-cfg["keys"] = [k for k in gem_keys + [groq_key, or_key, cus_key, tav_key, etsy_key] if k]
+cfg = {"gem_keys": gem_keys, "gem_model": gem_model.strip(), "img_models": parse_models(img_txt),
+       "together": together_key, "groq_key": groq_key, "groq_model": groq_model.strip(),
+       "or_key": or_key, "or_model": or_model.strip(), "cus_base": cus_base.strip(), "cus_key": cus_key,
+       "cus_model": cus_model.strip(), "tavily": tav_key, "etsy": etsy_key, "brand": brand, "logo": logo_bytes}
+cfg["keys"] = [k for k in gem_keys + [together_key, groq_key, or_key, cus_key, tav_key, etsy_key] if k]
 
 with st.sidebar:
     if st.button("Test AI keys"):
@@ -1075,16 +1351,20 @@ with st.sidebar:
                 st.success(f"{name}: works")
             except Exception as e:
                 st.error(f"{name}: {mask(e, cfg['keys'])}")
-    if st.button("Test Gemini image model"):
-        try:
-            png = gemini_art(cfg, "one yellow star with a smile")
-            st.image(png, width=160, caption="Gemini image model works")
-        except Exception as e:
-            st.error(mask(e, cfg["keys"]))
+    if st.button("Test image models"):
+        if not cfg["img_models"]:
+            st.warning("Write at least one image model name above.")
+        for m in cfg["img_models"]:
+            try:
+                pic = image_once(cfg, m, "one yellow star with a smile")
+                st.success(f"{m}: picture works")
+                st.image(pic, width=140)
+            except Exception as e:
+                st.error(f"{m}: {mask(e, cfg['keys'])}")
 
-# ---- main header and flash message
+# ============================ MAIN ============================
 st.title("Business Factory v3")
-st.caption("Research, four designs, build, check, approve. You upload and post yourself.")
+st.caption("Research, screenshots, four designs, chat changes, build, approve. You upload and post yourself.")
 if ss.get("flash"):
     kind, msg = ss.pop("flash")
     getattr(st, kind)(msg)
@@ -1101,15 +1381,17 @@ proj = ss["proj"]
 proj.update(niche=niche, sub=sub, market=market)
 proj["name"] = st.text_input("Project name", key="pname") or proj["name"]
 n_designs = len(proj["designs"])
+n_shots = len(as_list(as_dict(proj.get("screens")).get("observations")))
 n_ok = sum(1 for i in range(n_designs) if ss.get(f"ok{i}") and ss["builds"].get(i, {}).get("status") != "FAIL")
 st.caption(f"Research: {'saved ' + proj['research_at'] if proj.get('research') else 'not yet'} | "
-           f"Designs: {n_designs}/4 | Approved files: {n_ok}")
+           f"Screenshot notes: {n_shots} | Designs: {n_designs}/4 | Approved files: {n_ok}")
 
-t1, t2, t3, t4 = st.tabs(["1 Research", "2 Designs", "3 Build and export", "Project"])
+t1, t2, t3, t4, t5, t6 = st.tabs(["1 Research", "2 Screenshots", "3 Designs", "4 Chat",
+                                  "5 Build and export", "6 History"])
 
-# ---- tab 1: research
+# ---- tab 1: research (one button)
 with t1:
-    st.subheader("1. Research (one button)")
+    st.subheader("1. Research")
     query = st.text_input("Search phrase", value=f"{sub} printable", key=f"q_{sub}")
     notes = st.text_area("Your notes (optional, read as owner input)", value=proj["notes"], key="notes")
     ca, cb = st.columns(2)
@@ -1119,52 +1401,80 @@ with t1:
     if st.button("Research now", type="primary"):
         key = research_key(niche, sub, market, query, notes, use_etsy, use_trends)
         if proj.get("research") and proj.get("research_key") == key and not again:
-            st.info(f"Saved research from {proj['research_at']} matches these settings. "
-                    "Tick 'research again' to refresh.")
+            st.info(f"Saved research from {proj['research_at']} matches these settings. Tick 'research again' to refresh.")
         else:
             with st.spinner("Researching..."):
                 try:
                     res, ev, warns, used = run_research(cfg, niche, sub, market, query, notes, use_etsy, use_trends)
                     proj.update(research=res, evidence=ev, research_at=now_iso(), research_key=key, notes=notes)
-                    st.success(f"Research saved. Answered by {used}.")
+                    st.success(f"Research made by {used}.")
                     for w in warns:
                         st.warning(w)
+                    ok, info = checkpoint("Research")
+                    st.caption(f"Saved: {info}" if ok else f"Not saved: {info}")
                 except Exception as e:
                     st.error("Research failed. Earlier saved research is kept. " + mask(e, cfg["keys"]))
     if proj.get("research"):
-        st.caption(f"Saved {proj['research_at']} | evidence items: {len(proj['evidence'])}")
+        st.caption(f"Research saved {proj['research_at']} | evidence items: {len(proj['evidence'])}")
         show_research(proj["research"])
         with st.expander("Evidence list and links"):
             for e in proj["evidence"]:
                 st.markdown(f"**{e['id']}** {e['kind']}: {e.get('title', '')} {e.get('url', '')} ({e.get('date', '')})")
 
-# ---- tab 2: screenshots and designs
+# ---- tab 2: screenshots, after research
 with t2:
-    st.subheader("2. Screenshots and four designs")
-    st.caption("Optional: up to 10 screenshots (Etsy, Pinterest, competitors). They show layout only, not sales.")
+    st.subheader("2. Screenshots (after research)")
+    st.caption(f"Up to {MAX_SHOTS} screenshots: Etsy, Pinterest, competitor listings. They show layout and colours only, not sales.")
+    if not proj.get("research"):
+        st.info("Research first (tab 1). Screenshots are read after research.")
     shots = st.file_uploader("Screenshots", type=["png", "jpg", "jpeg", "webp"], accept_multiple_files=True,
                              key="shots")
+    if shots:
+        st.image([f.getvalue() for f in shots[:MAX_SHOTS]], width=120)
     if st.button("Read screenshots (needs a Gemini key)", disabled=not shots):
         try:
-            raw, used = read_screens(cfg, shots)
+            with st.spinner("Reading screenshots..."):
+                raw, used = read_screens(cfg, shots)
             proj["screens"] = as_dict(raw)
             st.success(f"Screenshots read by {used}.")
+            ok, info = checkpoint("Screenshots read")
+            st.caption(f"Saved: {info}" if ok else f"Not saved: {info}")
         except Exception as e:
             st.error("Screenshot reading failed: " + mask(e, cfg["keys"]))
+    scr = as_dict(proj.get("screens"))
+    if scr:
+        st.markdown("**What the screenshots show** (layout only)")
+        for o in as_list(scr.get("observations"))[:12]:
+            if isinstance(o, dict):
+                st.write(f"- {o.get('item', '')}: {o.get('detail', '')}")
+        pal_hex = [h for h in as_list(scr.get("palette_hex")) if isinstance(h, str) and HEX.match(h)]
+        if pal_hex:
+            st.write("Colours seen: " + "  ".join(f"`{h}`" for h in pal_hex))
+        st.caption(str(scr.get("not_proof", "screenshots show layout only, not sales")))
+
+# ---- tab 3: four designs
+with t3:
+    st.subheader("3. Four designs")
     dnotes = st.text_area("Notes for the designs (optional)", key="dnotes")
     if st.button("Make four designs", type="primary"):
         if not proj.get("research"):
             st.warning("Run research first (tab 1). Designs need evidence.")
         else:
             try:
-                designs, used = make_designs(cfg, proj, template, niche, sub, market, dnotes)
+                with st.spinner("Designing..."):
+                    designs, used = make_designs(cfg, proj, template, niche, sub, market, dnotes)
                 proj["designs"] = designs
                 for i in range(4):
                     ss["builds"].pop(i, None)
                     ss.pop(f"ok{i}", None)
+                ss["pending"] = None
                 st.success(f"Four designs made by {used}.")
+                ok, info = checkpoint("Four designs")
+                st.caption(f"Saved: {info}" if ok else f"Not saved: {info}")
             except Exception as e:
                 st.error("Design step failed. Earlier designs are kept. " + mask(e, cfg["keys"]))
+    if not proj["designs"]:
+        st.info("No designs yet.")
     for i, d in enumerate(proj["designs"]):
         with st.container(border=True):
             st.markdown(f"**Design {i + 1}: {d['style']}**  \n{d['title']} | {d['subtitle']}")
@@ -1178,25 +1488,63 @@ with t2:
                 st.caption(d["note"])
             for w in d["warnings"]:
                 st.warning(w)
-            with st.expander("Full image prompt (copy button inside)"):
+            with st.expander("Full image prompt"):
                 st.code(d["full_prompt"], language=None)
-            change = st.text_input("Change this design (optional)", key=f"chg{i}")
-            if st.button("Apply change", key=f"apply{i}") and change.strip():
-                try:
-                    newd, _ = revise_one(cfg, d, change.strip())
-                except Exception as e:
-                    st.error("Change failed. This design is kept. " + mask(e, cfg["keys"]))
-                else:
-                    proj["designs"][i] = newd
-                    ss["builds"].pop(i, None)
-                    ss.pop(f"ok{i}", None)
-                    st.rerun()
 
-# ---- tab 3: build, check, approve, export
-with t3:
-    st.subheader("3. Build, check and export")
+# ---- tab 4: chat (instructions, you approve before anything changes)
+with t4:
+    st.subheader("4. Chat: give instructions to the designs")
+    st.caption("Write in Urdu or English. The assistant proposes changes first; nothing changes until you press Apply.")
+    designs = proj["designs"]
+    if not designs:
+        st.info("Make the four designs first (tab 3).")
+    target_opts = ["All designs"] + [f"Design {i + 1}" for i in range(len(designs))]
+    target = st.selectbox("Which design should change?", target_opts, key="chat_target", disabled=not designs)
+    for m in proj["chat"][-20:]:
+        with st.chat_message("user" if m["role"] == "user" else "assistant"):
+            st.write(m["text"])
+    pend = ss.get("pending")
+    if pend:
+        st.info(pend["reply"])
+        if pend["changes"]:
+            st.write("Proposed changes (not applied yet):")
+            for idx, nd in pend["changes"]:
+                old = proj["designs"][idx]
+                with st.container(border=True):
+                    st.markdown(f"**Design {idx + 1}**: {old['title']}  →  {nd['title']}")
+                    st.write("Palette: " + "  ".join(f"{k} `{v}`" for k, v in nd["palette"].items()))
+                    if nd["rows"]:
+                        st.write("Rows: " + " | ".join(nd["rows"]))
+                    with st.expander("New full prompt"):
+                        st.code(nd["full_prompt"], language=None)
+            b1, b2 = st.columns(2)
+            b1.button("Apply these changes", type="primary", on_click=apply_pending)
+            b2.button("Discard", on_click=discard_pending)
+    msg = st.text_area("Your instruction", key="chat_text", disabled=not designs,
+                       placeholder="مثال: سرخیاں بڑی کریں، رنگ زیادہ چمکدار کریں، Design 2 کی تحریر بڑی کریں")
+    if st.button("Send", type="primary", disabled=not designs, key="chat_send"):
+        text = (msg or "").strip()
+        if not text:
+            st.warning("Write an instruction first.")
+        else:
+            try:
+                with st.spinner("Thinking..."):
+                    reply, changes, used = chat_turn(cfg, proj, target, text)
+                proj["chat"] = (proj["chat"] + [{"role": "user", "text": f"[{target}] {text}"},
+                                                 {"role": "assistant", "text": reply}])[-40:]
+                ss["pending"] = {"reply": reply, "changes": changes}
+                ok, info = checkpoint("Chat")
+                ss["flash"] = ("success", f"Answered by {used}. Saved at {info}") if ok else \
+                    ("warning", f"Answered by {used}, but not saved: {info}")
+            except Exception as e:
+                ss["flash"] = ("error", "Chat failed. Designs are unchanged. " + mask(e, cfg["keys"]))
+            st.rerun()
+
+# ---- tab 5: build, check, approve, export
+with t5:
+    st.subheader("5. Build, check and export")
     if not proj["designs"]:
-        st.info("Make the four designs first (tab 2).")
+        st.info("Make the four designs first (tab 3).")
     for i, d in enumerate(proj["designs"]):
         with st.container(border=True):
             st.markdown(f"**{i + 1}. {d['style']}**: {d['title']}")
@@ -1204,7 +1552,7 @@ with t3:
             paper = c1.selectbox("Size", list(FORMATS), index=list(FORMATS).index(MARKETS[market]), key=f"paper{i}")
             output = c2.radio("Output", ["PDF", "PNG"], horizontal=True, key=f"out{i}")
             mono = c3.checkbox("Ink-saver (black and white)", key=f"mono{i}")
-            art_on = st.checkbox("Add a decorative picture (Gemini image model)", key=f"art{i}")
+            art_on = st.checkbox("Add a decorative picture (image model)", key=f"art{i}")
             mode, free_ok, url = None, False, ""
             if paper.startswith("Pinterest"):
                 mode = PIN_MODES[st.selectbox("Pin type", list(PIN_MODES), key=f"pin{i}")]
@@ -1212,18 +1560,19 @@ with t3:
                     free_ok = st.checkbox("I have a real free file to download", key=f"free{i}")
                 url = st.text_input("Destination link (optional, saved in notes, not in the image)", key=f"url{i}")
             if st.button("Build this file", key=f"build{i}", type="primary"):
-                art, art_err = None, ""
+                art, art_info = None, ""
                 if art_on:
                     try:
-                        art = gemini_art(cfg, d["art_prompt"] or d["title"])
+                        art, model_used = gemini_art(cfg, d["art_prompt"] or d["title"])
+                        art_info = f"image model {model_used}"
                     except Exception as e:
-                        art_err = mask(e, cfg["keys"])
+                        art_info = "not added: " + mask(e, cfg["keys"])
                 opts = {"paper": paper, "output": output, "mono": mono, "mode": mode, "free_ok": free_ok,
                         "url": url.strip(),
                         "pin_copy": as_dict(as_dict(proj.get("research")).get("pin_copy"))}
                 try:
                     with st.spinner("Building..."):
-                        ss["builds"][i] = build_one(d, opts, cfg["logo"], cfg["brand"], art, art_err)
+                        ss["builds"][i] = build_one(d, opts, cfg["logo"], cfg["brand"], art, art_info)
                     ss.pop(f"ok{i}", None)
                 except Exception as e:
                     st.error("Build failed. The previous file is kept. " + mask(e, cfg["keys"]))
@@ -1255,11 +1604,38 @@ with t3:
         st.download_button("Download ZIP", data=ss["zip"], file_name=f"{safe_name(proj['name'])}.zip",
                            mime="application/zip", key="zipdl")
 
-# ---- tab 4: project backup and restore
-with t4:
-    st.subheader("Project backup")
-    st.caption("Session memory is temporary. Download a backup and keep it. API keys are never saved in a backup.")
-    st.download_button("Download project backup (JSON)", data=backup_bytes(proj),
+# ---- tab 6: history (every saved stage, by date) and backups
+with t6:
+    st.subheader("6. History")
+    st.caption(f"Saves are stored in: {DB_PATH}. If this app runs on a host that wipes files on restart, "
+               "also download a backup below.")
+    st.markdown(f"**Current project: {proj['name']}**")
+    try:
+        snaps = list_snapshots(proj["id"])
+    except Exception as e:
+        snaps = []
+        st.error("History is not available: " + mask(e))
+    if not snaps:
+        st.info("No saves yet for this project. Saves appear after research, screenshots, designs and chat changes.")
+    for sid, saved_at, label in snaps:
+        a, b, c = st.columns([3, 1, 1])
+        a.write(f"{saved_at} | {label}")
+        b.button("Open", key=f"open{sid}", on_click=open_snapshot, args=(sid,))
+        c.button("Delete", key=f"del{sid}", on_click=delete_snapshot_cb, args=(sid,))
+    st.divider()
+    st.markdown("**All projects**")
+    try:
+        projs = list_projects()
+    except Exception as e:
+        projs = []
+        st.error("Project list is not available: " + mask(e))
+    for pid, name, saved_at, label in projs:
+        a, b = st.columns([3, 1])
+        a.write(f"{name} | last save {saved_at} | {label}")
+        b.button("Open", key=f"openp{pid}", on_click=open_project, args=(pid,))
+    st.divider()
+    st.button("Start a new project", on_click=new_project_cb)
+    st.download_button("Download this project backup (JSON)", data=backup_bytes(proj),
                        file_name=f"{safe_name(proj['name'])}_backup.json", mime="application/json", key="bkp")
-    st.file_uploader("Choose a backup to restore", type=["json"], key="restore_up")
+    st.file_uploader("Restore from a backup file", type=["json"], key="restore_up")
     st.button("Restore this backup", on_click=do_restore)
