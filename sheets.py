@@ -147,6 +147,17 @@ RED_FONT = Font(name=FONT, color="991B1B", bold=True)
 AMBER_FILL = PatternFill(fill_type="solid", start_color="FEF3C7", end_color="FEF3C7")
 AMBER_FONT = Font(name=FONT, color="92400E")
 PROTECT_ON = True
+VALIDATIONS_ON = True
+CONDITIONAL_ON = True
+OVERRIDE_TEXT = {}  # brain text: start lines and tab hints
+THEMES = {  # (title colour, header colour). Only titles and headers change; the legend colours stay fixed.
+    "blue": ("173B75", "1E3A8A"),
+    "green": ("14532D", "166534"),
+    "purple": ("4C1D95", "5B21B6"),
+    "teal": ("134E4A", "0F766E"),
+    "amber": ("78350F", "92400E"),
+    "rose": ("881337", "9F1239"),
+}
 LAYOUTS = ("laptop", "phone")
 LAYOUT_NOTE = {
     "laptop": "Laptop file: wider columns, more of the table on screen at once.",
@@ -209,7 +220,7 @@ def _data_sheet(wb, name, cur, layout="laptop"):
     ws["A1"].alignment = Alignment(vertical="center")
     ws.row_dimensions[1].height = 30
     ws.merge_cells(f"A2:{last}2")
-    ws["A2"] = HINTS[name]
+    ws["A2"] = OVERRIDE_TEXT.get("hints", {}).get(name, HINTS[name])
     ws["A2"].font = _font(False, 10, "334155", True)
     ws["A2"].alignment = Alignment(wrap_text=True, vertical="center")
     ws.row_dimensions[2].height = 32
@@ -231,7 +242,7 @@ def _data_sheet(wb, name, cur, layout="laptop"):
             if spec[3]:
                 cell.value = spec[3].format(r=r)
             _style(cell, spec[1], cur)
-    for ci, spec in enumerate(cols, 1):
+    for ci, spec in enumerate(cols, 1) if VALIDATIONS_ON else []:
         col = get_column_letter(ci)
         if spec[4]:
             dv = DataValidation(type="list", formula1='"' + ",".join(spec[4]) + '"', allow_blank=True)
@@ -244,7 +255,7 @@ def _data_sheet(wb, name, cur, layout="laptop"):
             dv.error = "Type a percent, for example 12%."
             ws.add_data_validation(dv)
             dv.add(f"{col}{FIRST}:{col}{LAST}")
-    for rng, rule in _rules(name):
+    for rng, rule in (_rules(name) if CONDITIONAL_ON else []):
         ws.conditional_formatting.add(rng, rule)
     ws.freeze_panes = f"{'B' if layout == 'phone' else 'C'}{FIRST}"
     ws.auto_filter.ref = f"A3:{last}{LAST}"
@@ -290,9 +301,10 @@ def _settings_sheet(wb, cur, business):
         c.border = BOX
         c.alignment = Alignment(wrap_text=True, vertical="center")
         ws.row_dimensions[i].height = 30
-    dv = DataValidation(type="list", formula1='"Direct cost,Quote"', allow_blank=False)
-    ws.add_data_validation(dv)
-    dv.add("B4")
+    if VALIDATIONS_ON:
+        dv = DataValidation(type="list", formula1='"Direct cost,Quote"', allow_blank=False)
+        ws.add_data_validation(dv)
+        dv.add("B4")
     ws.column_dimensions["A"].width = 26
     ws.column_dimensions["B"].width = 22
     ws.column_dimensions["C"].width = 72
@@ -350,7 +362,7 @@ def dashboard_blocks(module):
 def _dashboard_sheet(wb, module, cur, business, layout="laptop"):
     ws = wb.create_sheet(DASH)
     ws.merge_cells("A1:C1")
-    ws["A1"] = f"DASHBOARD • {business.upper()} • automatic, do not type here"
+    ws["A1"] = "DASHBOARD • automatic, do not type here"
     ws["A1"].font = _font(True, 13, "FFFFFF")
     ws["A1"].fill = _fill(NAVY)
     ws.row_dimensions[1].height = 30
@@ -375,6 +387,15 @@ def _dashboard_sheet(wb, module, cur, business, layout="laptop"):
             n.border = BOX
             row += 1
         row += 1
+    if module in ("job_costing", "bundle"):
+        from openpyxl.chart import BarChart, Reference
+        chart = BarChart()
+        chart.type = "col"
+        chart.title = "Profit by job"
+        chart.add_data(Reference(wb[JOB], min_col=15, min_row=3, max_row=LAST), titles_from_data=True)
+        chart.set_categories(Reference(wb[JOB], min_col=1, min_row=FIRST, max_row=LAST))
+        chart.height, chart.width = 8, 16
+        ws.add_chart(chart, "E3")
     ws.protection.sheet = PROTECT_ON
     return ws
 
@@ -383,7 +404,7 @@ def _start_sheet(ws, module, cur, business, layout="laptop"):
     ws.sheet_view.showGridLines = False
     ws.column_dimensions["A"].width = 105
     rows = [
-        ("title", f"{business.upper()} • START HERE"),
+        ("title", "START HERE"),
         ("head", PRODUCT_NAMES[module]),
         ("text", "Download this file, upload it to Google Drive, open it in Google Sheets (or Excel), "
                  "then make your own copy before you type."),
@@ -404,6 +425,7 @@ def _start_sheet(ws, module, cur, business, layout="laptop"):
                  "Check currency and tax rules for your area."),
         ("head", "Example row"),
     ] + [("example", EXAMPLES[s][0]) for s in PRODUCT_SHEETS[module]] + [("example", EXAMPLE_NOTE)]
+    rows = rows[:2] + [("text", s) for s in OVERRIDE_TEXT.get("start_lines", [])] + rows[2:]
     r = 1
     for kind, text in rows:
         cell = ws.cell(row=r, column=1, value=text)
@@ -432,8 +454,18 @@ def _start_sheet(ws, module, cur, business, layout="laptop"):
     ws.protection.sheet = PROTECT_ON
 
 
-def build_workbook(module, currency="USD", business="My Business", layout="laptop"):
-    """Return the .xlsx file as bytes. layout is "laptop" or "phone"."""
+def build_workbook(module, currency="USD", business="My Business", layout="laptop",
+                   theme="blue", protect=True, validations=True, conditional=True, text=None):
+    """Return the .xlsx file as bytes.
+
+    layout: "laptop" or "phone". theme: a key of THEMES (titles and headers only).
+    protect, validations, conditional: switch off for the plain test variants.
+    """
+    global PROTECT_ON, VALIDATIONS_ON, CONDITIONAL_ON, NAVY, HEAD
+    PROTECT_ON, VALIDATIONS_ON, CONDITIONAL_ON = bool(protect), bool(validations), bool(conditional)
+    NAVY, HEAD = THEMES.get(theme, THEMES["blue"])
+    global OVERRIDE_TEXT
+    OVERRIDE_TEXT = dict(text or {})
     if module not in PRODUCT_SHEETS:
         raise ValueError(f"unknown product: {module}")
     if layout not in LAYOUTS:
