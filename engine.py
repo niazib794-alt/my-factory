@@ -88,7 +88,7 @@ def _post(url, headers, body, timeout=120):
     raise EngineError("no reply after retries")
 
 
-def call_slot(entry, system, user, images=()):
+def call_slot(entry, system, user, images=(), grounding=False, sources=None):
     """One call to one slot. Returns the text of the reply."""
     if entry["kind"] == "gemini":
         parts = [{"text": user}]
@@ -97,12 +97,19 @@ def call_slot(entry, system, user, images=()):
         body = {"system_instruction": {"parts": [{"text": system}]},
                 "contents": [{"role": "user", "parts": parts}],
                 "generationConfig": {"temperature": 0.3, "maxOutputTokens": 8192}}
+        if grounding:
+            body["tools"] = [{"google_search": {}}]
         data = _post(f"{GEMINI}/models/{entry['model']}:generateContent",
                      {"Content-Type": "application/json", "x-goog-api-key": entry["key"]}, body)
         try:
             text = "".join(p.get("text", "") for p in data["candidates"][0]["content"]["parts"])
         except (KeyError, IndexError, TypeError):
             raise EngineError("blocked or empty reply")
+        if sources is not None:
+            for ch in data["candidates"][0].get("groundingMetadata", {}).get("groundingChunks", []):
+                w = ch.get("web", {})
+                if w.get("uri"):
+                    sources.append({"title": w.get("title", ""), "url": w["uri"]})
     else:
         if images:
             raise EngineError("this slot cannot read images")
@@ -125,7 +132,7 @@ def record(log, job, slot, ok, ms, note, keys):
     del log[:-500]
 
 
-def run_job(job, system, user, slots, log, keys, images=()):
+def run_job(job, system, user, slots, log, keys, images=(), grounding=False, sources=None):
     """Ask the slots for this job in order. Returns (text, slot name)."""
     entries = ordered_for(job, ready_entries(slots))
     if not entries:
@@ -136,7 +143,7 @@ def run_job(job, system, user, slots, log, keys, images=()):
             continue
         t0 = time.time()
         try:
-            text = call_slot(e, system, user, images)
+            text = call_slot(e, system, user, images, grounding, sources)
             record(log, job, e["name"], True, (time.time() - t0) * 1000, "ok", keys)
             return text, e["name"]
         except Exception as ex:
@@ -156,13 +163,13 @@ def extract_json(text):
     return json.loads(t[a:b + 1])
 
 
-def json_job(job, system, user, slots, log, keys, check, images=(), attempts=2):
+def json_job(job, system, user, slots, log, keys, check, images=(), attempts=2, grounding=False, sources=None):
     """Ask for JSON and check it. check(data) returns a list of problems (empty means fine)."""
     problem = ""
     for _ in range(attempts):
         extra = (f"\n\nYOUR PREVIOUS REPLY WAS REJECTED: {problem}. "
                  "Reply again with ONLY valid JSON in the required shape.") if problem else ""
-        text, slot = run_job(job, system, user + extra, slots, log, keys, images)
+        text, slot = run_job(job, system, user + extra, slots, log, keys, images, grounding, sources)
         try:
             problems = check(extract_json(text))
         except Exception as ex:
@@ -199,13 +206,15 @@ def list_models(entry):
     return sorted(m.get("id", "") for m in r.json().get("data", []) if m.get("id"))
 
 
-def tavily(key, query):
+def tavily(key, query, items=None):
     data = _post(TAVILY_URL, {"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
                  {"query": query[:300], "search_depth": "basic", "max_results": 6, "include_answer": True}, timeout=60)
     out = []
     if data.get("answer"):
         out.append("SUMMARY (open the links yourself): " + str(data["answer"]))
     for i, r in enumerate(data.get("results", []), 1):
+        if items is not None:
+            items.append({"title": r.get("title", ""), "url": r.get("url", "")})
         out.append(f"[{i}] {r.get('title', '')} | {r.get('url', '')} | "
                    f"{r.get('published_date') or 'date not given'}\n{str(r.get('content', ''))[:700]}")
     return "\n\n".join(out)

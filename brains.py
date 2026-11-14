@@ -54,7 +54,8 @@ Change types allowed: colour, font, layout, feature, ease_of_use, complaint_fix,
 Plan at least TWO different change types. With buyer complaints, one change must be complaint_fix.
 Theme: one of blue, green, purple, teal, amber, rose. It must differ from the last version's theme.
 Avoid repeating the same product on several days in a row unless there is a clear reason.
-Shape: {"product": "job_costing", "theme": "green", "summary": "one sentence", "changes": [{"type": "colour", "what": "...", "why": "...", "evidence_ids": ["E1"]}]}"""
+If RESULTS OF PAST VERSIONS are given, do not simply repeat a product or change that got no sales after 100 views. Say what the results taught you in results_considered.
+Shape: {"product": "job_costing", "theme": "green", "summary": "one sentence", "results_considered": "what past results showed, or empty if none", "changes": [{"type": "colour", "what": "...", "why": "...", "evidence_ids": ["E1"]}]}"""
 
 ROLE4 = """TASK: write the text that goes into the workbook: start lines for the START HERE tab, and one hint for each tab.
 Keep the planned changes visible in the text (for example, name the colour or layout change in a start line).
@@ -103,7 +104,8 @@ def _ask(ctx, job, brain, role, user, check, images=()):
         user += "\n\nCRITIC NOTES (fix every one; do not repeat the same problem):\n" + "\n".join(ctx["fix_notes"])
     if ctx.get("owner_notes"):
         user += f"\n\nOWNER NOTES (the owner wants this changed): {ctx['owner_notes']}"
-    return engine.json_job(job, system, user, ctx["slots"], ctx["log"], ctx["keys"], check, images)
+    return engine.json_job(job, system, user, ctx["slots"], ctx["log"], ctx["keys"], check, images,
+                           grounding=ctx.get("grounding", False) and brain == 1, sources=ctx.get("sources"))
 
 
 # ---------------- brain 1: evidence
@@ -187,6 +189,8 @@ def check_plan(d, ctx):
         probs.append("with buyer complaints, one change must be complaint_fix")
     if not str(d.get("summary", "")).strip():
         probs.append("summary is empty")
+    if ctx.get("results_text", "none") != "none" and not str(d.get("results_considered", "")).strip():
+        probs.append("results exist: say in results_considered what they showed")
     return probs[:6]
 
 
@@ -201,6 +205,7 @@ def brain3(ctx):
             f"LAST APPROVED VERSION: {prev['summary'] if prev else 'none (first version)'}\n"
             f"LAST THEME: {ctx.get('prev_theme') or 'none'}\n\n"
             f"RECENT DAYS (avoid repeating):\n{recent}")
+    user += f"\n\nRESULTS OF PAST VERSIONS (owner's own numbers):\n{ctx.get('results_text', 'none')}"
     return _ask(ctx, "Decide", 3, ROLE3, user, lambda d: check_plan(d, ctx))
 
 
@@ -252,6 +257,7 @@ def check_decision(d):
 def brain5(ctx):
     user = (f"PLAN:\n{json.dumps(ctx['out']['3'], ensure_ascii=False)[:4000]}\n\n"
             f"EVIDENCE:\n{json.dumps(ctx['out']['1'], ensure_ascii=False)[:8000]}\n\nCURRENCY: {ctx['currency']}")
+    user += f"\n\nRESULTS OF PAST VERSIONS:\n{ctx.get('results_text', 'none')}"
     return _ask(ctx, "Decide", 5, ROLE5, user, check_decision)
 
 
@@ -381,6 +387,22 @@ def brain9(ctx):
         if not ok:
             fix.add(int(n))
             problems.append(f"brain {n}: remove " + (", ".join(hits) or "the word FREE"))
+    if any("Critic" in e.get("duties", []) for e in engine.ready_entries(ctx["slots"])):
+        summary = {"plan": plan.get("summary", ""), "listing_description": out["6"]["description"][:1500],
+                   "sheet_hints": list(out["4"]["hints"].values())[:6]}
+        try:
+            crit, _slot = engine.json_job(
+                "Critic", SHARED + "\n\nBRAIN 9 - Critic and gate\nTASK: read the summary and reply JSON: "
+                '{"verdict": "PASS or FIX", "problems": ["..."]}. Look for claims without evidence, buyer promises, '
+                "wording that does not match the plan, and anything a buyer could misread.",
+                json.dumps(summary, ensure_ascii=False), ctx["slots"], ctx["log"], ctx["keys"],
+                lambda d: [] if isinstance(d, dict) and d.get("verdict") in ("PASS", "FIX")
+                else ["verdict must be PASS or FIX"])
+            problems_ai = [str(x) for x in crit.get("problems", [])][:5]
+            checks.append(("AI critic (advisory)", "PASS" if crit["verdict"] == "PASS" else "WARNING",
+                           "; ".join(problems_ai) or "no concerns"))
+        except Exception as e:
+            checks.append(("AI critic (advisory)", "WARNING", "skipped: " + str(e)[:120]))
     verdict = "BLOCK" if block else ("FIX" if fix else "PASS")
     checks.append(("Overall gate", verdict, f"{len(checks)} checks"))
     return {"verdict": verdict, "checks": checks, "fix_brains": sorted(fix), "problems": problems}
