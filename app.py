@@ -1,8 +1,8 @@
-"""Business Factory 5 - one app for phone and laptop.
+"""Business Factory 5 - one app for phone and laptop (version 6).
 
-Files: app.py (this file), brains.py (the ten brains), engine.py (AI slots and duties),
-sheets.py (workbooks), store.py (saving), requirements.txt, README_URDU.txt.
-API keys: the left sidebar (the >> button at the top left on a phone).
+Files: app.py (this file), brains.py (twelve brains), engine.py (AI slots and duties), sheets.py (workbooks),
+store.py (saving), requirements.txt, README_URDU.txt.
+API keys: the left sidebar (the >> button at the top left on a phone). Brand: Streamlit secret BRAND_NAME.
 """
 import io
 import zipfile
@@ -11,9 +11,10 @@ import streamlit as st
 
 import brains
 import engine
+import sheets
 import store
 
-st.set_page_config(page_title="Business Factory 5", page_icon="🧰", layout="centered")
+st.set_page_config(page_title="Gripco Factory", page_icon="🧰", layout="centered")
 st.markdown("""
 <style>
 .block-container {padding-top: 1.2rem; padding-bottom: 3rem; max-width: 1000px;}
@@ -21,8 +22,10 @@ st.markdown("""
           border-radius: 18px; padding: 18px 20px; margin-bottom: 12px;}
 .bf-hero h2 {margin: 0; color: #ffffff; font-size: 1.5rem;}
 .bf-hero p {margin: 4px 0 0 0; opacity: .88; font-size: .92rem;}
-.bf-chip {display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: .78rem;
+.bf-chip {display: inline-block; padding: 4px 12px; border-radius: 999px; font-size: .8rem;
           font-weight: 700; margin-right: 6px; color: #ffffff;}
+.bf-swatch {display: inline-block; width: 18px; height: 18px; border-radius: 4px; vertical-align: middle;
+            margin-right: 6px; border: 1px solid #cbd5e1;}
 .stButton > button, .stDownloadButton > button {min-height: 46px; border-radius: 12px; font-weight: 700;}
 div[data-testid="stMetric"] {border: 1px solid #e2e8f0; border-radius: 14px; padding: 10px 12px;}
 @media (max-width: 700px) {
@@ -32,12 +35,10 @@ div[data-testid="stMetric"] {border: 1px solid #e2e8f0; border-radius: 14px; pad
 </style>
 """, unsafe_allow_html=True)
 
-THEME_COLOURS = {"blue": "#1E3A8A", "green": "#166534", "purple": "#5B21B6",
-                 "teal": "#0F766E", "amber": "#92400E", "rose": "#9F1239"}
 AUTO = "Auto: the brains choose"
 TITLE_TO_KEY = {v: k for k, v in brains.PRODUCT_TITLES.items()}
-CURRENCIES = ["USD", "CAD", "GBP", "EUR", "AUD"]
-MARKETS = ["USA", "Canada", "United Kingdom", "European Union", "Australia"]
+TRADE_KEY_BY_LABEL = {v["label"]: k for k, v in sheets.TRADES.items()}
+MARKET_CURRENCY = {"United States": "USD", "United Kingdom": "GBP", "Canada": "CAD", "Europe": "EUR"}
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 ss = st.session_state
@@ -69,6 +70,10 @@ def google_test_zip(zip_bytes):
             if n.startswith("google_test/"):
                 dst.writestr(n.split("/", 1)[1], src.read(n))
     return buf.getvalue()
+
+
+def chip(text, colour):
+    return f"<span class='bf-chip' style='background:#{colour}'>{text}</span>"
 
 
 # ---------------- sidebar: API keys and duties (left side)
@@ -108,20 +113,24 @@ keys_all = [s["key"] for s in slots if s["key"]] + ([tav_key] if tav_key else []
 
 # ---------------- project in memory
 if "proj" not in ss:
-    ss["proj"] = store.new_project("My first project", "Plumbers and electricians", "USD",
-                                   secret("BRAND_NAME", "Contractor Business Toolkit"), ["USA"])
+    ss["proj"] = store.new_project("My first project", "Plumbers & Electricians", "USD",
+                                   secret("BRAND_NAME", sheets.BRAND_DEFAULT), ["United States"])
+    ss["proj"]["trade"], ss["proj"]["market"] = "plumb_elec", "United States"
 proj = ss["proj"]
+proj.setdefault("trade", "plumb_elec")
+proj.setdefault("market", "United States")
 
 
 def _sync_widgets(p):
-    ss["aud"], ss["cur"], ss["biz"] = p["audience"], p["currency"], p["business"]
-    ss["mk"] = [m for m in p["markets"] if m in MARKETS] or ["USA"]
-    ss["compl"] = "\n".join(p["complaints"])
+    ss["trade_sel"] = sheets.TRADES.get(p.get("trade", "plumb_elec"), sheets.TRADES["plumb_elec"])["label"]
+    ss["mkt"] = p.get("market", "United States") if p.get("market") in MARKET_CURRENCY else "United States"
+    ss["brand"] = p.get("business", sheets.BRAND_DEFAULT)
+    ss["compl"] = "\n".join(p.get("complaints", []))
 
 
 def cb_new():
-    p = store.new_project(f"New project {store.now()}", ss.get("aud", ""), ss.get("cur", "USD"),
-                          ss.get("biz", "Contractor Business Toolkit"), ss.get("mk", ["USA"]))
+    p = store.new_project(f"New project {store.now()}", "", "USD", secret("BRAND_NAME", sheets.BRAND_DEFAULT), [])
+    p["trade"], p["market"] = ss.get("trade_key", "plumb_elec"), ss.get("mkt", "United States")
     ss["proj"] = p
     store.save_project(p)
     _sync_widgets(p)
@@ -158,13 +167,14 @@ def cb_restore():
 # ---------------- header
 answered = len([c for c in proj.get("complaint_log", []) if c.get("status") == "answered"])
 st.markdown(
-    f"""<div class="bf-hero"><h2>🧰 Business Factory 5</h2>
-    <p>Research, decision, two workbooks (laptop and phone), listing, guide, pins, checks and a ZIP.
-    You approve, then upload yourself. No sales or income is promised.</p></div>""",
+    f"""<div class="bf-hero"><h2>🧰 Gripco Factory · Business Factory 5</h2>
+    <p>Trade spreadsheets with research, decision, two workbooks (laptop and phone), listing, guide, pins,
+    checks and a ZIP. You approve, then upload yourself. No sales or income is promised.</p></div>""",
     unsafe_allow_html=True)
+today_count = len(store.approved_today())
 m1, m2, m3, m4 = st.columns(4)
 m1.metric("Approved versions", len(proj["versions"]))
-m2.metric("Today", f"{len(store.approved_today())} of {store.DAILY_LIMIT}")
+m2.metric("Today", f"{today_count} of {store.DAILY_LIMIT}")
 m3.metric("Open complaints", len(proj["complaints"]))
 m4.metric("Complaints answered", answered)
 if ss["flash"]:
@@ -177,31 +187,42 @@ tab_make, tab_results, tab_projects, tab_chat, tab_api, tab_log = st.tabs(
 
 # ================= TAB: make today's product
 with tab_make:
-    st.markdown("#### 1. Product and customer")
+    st.markdown("#### 1. Trade, market and brand")
+    trade_label = st.selectbox("Trade (choose from the list)", sheets.TRADE_LABELS, key="trade_sel")
+    trade_key = TRADE_KEY_BY_LABEL[trade_label]
+    tr = sheets.TRADES[trade_key]
+    st.markdown(
+        f"{chip('header ' + tr['primary'], tr['primary'])} {chip('accent ' + tr['accent'], tr['accent'])} "
+        f"<span class='bf-swatch' style='background:#{tr['primary']}'></span>"
+        f"<span class='bf-swatch' style='background:#{tr['accent']}'></span> {tr['palette']}",
+        unsafe_allow_html=True)
+    for name, status, detail in sheets.palette_problems(trade_key):
+        if status != "PASS":
+            st.caption(f"⚠️ {name}: {detail}")
     c1, c2 = st.columns(2)
-    prod_choice = c1.selectbox("Product", [AUTO] + list(brains.PRODUCT_TITLES.values()), key="prod_sel")
-    audience = c2.text_input("Target customer", proj["audience"], key="aud")
-    c3, c4 = st.columns(2)
-    currency = c3.selectbox("Currency", CURRENCIES,
-                            index=CURRENCIES.index(proj["currency"]) if proj["currency"] in CURRENCIES else 0,
-                            key="cur")
-    business = c4.text_input("Business name (only in the Settings tab and file names)", proj["business"],
-                             key="biz").strip() or "Contractor Business Toolkit"
-    markets = st.multiselect("Markets", MARKETS, default=[m for m in proj["markets"] if m in MARKETS] or ["USA"],
-                             key="mk")
-    proj.update(audience=audience, currency=currency, business=business, markets=list(markets))
+    market = c1.selectbox("Market", list(MARKET_CURRENCY), key="mkt")
+    currency = MARKET_CURRENCY[market]
+    c1.caption(f"Currency: {currency}")
+    brand = c2.text_input("Brand name (START HERE, Settings and Dashboard)",
+                          secret("BRAND_NAME", sheets.BRAND_DEFAULT), key="brand").strip() or sheets.BRAND_DEFAULT
+    st.caption("Before you publish, check the brand name in an official trademark search. "
+               "Another business may already use this name in the same trade.")
+    prod_choice = st.selectbox("Product", [AUTO] + list(brains.PRODUCT_TITLES.values()), key="prod_sel")
+    proj.update(trade=trade_key, market=market, currency=currency, business=brand, audience=trade_label)
     fixed_key = None if prod_choice == AUTO else TITLE_TO_KEY[prod_choice]
 
     st.markdown("#### 2. Research")
+    passes = st.slider("Research passes (each pass uses a different free key)", brains.RESEARCH_MIN,
+                       brains.RESEARCH_MAX, brains.RESEARCH_DEFAULT, key="passes")
     mode = st.radio("Research source", ["I will paste my own research", "AI researches on its own"],
                     horizontal=True, key="rmode")
     pasted = st.text_area("Paste research (Perplexity, another tool, or your notes)", height=140,
                           key="pasted") if mode.startswith("I") else ""
     source = st.text_input("Which tool or source did it come from?", "Perplexity", key="src")
     c5, c6 = st.columns(2)
-    use_web = c5.checkbox("Web search with Tavily", value=bool(tav_key), key="webon")
-    use_gem = c6.checkbox("Gemini live Google search (brain 1)", value=False, key="gemweb",
-                          help="Gemini searches the web and returns links. Those links are shown as sources.")
+    use_web = c5.checkbox("Web search with Tavily (one search per pass)", value=bool(tav_key), key="webon")
+    use_gem = c6.checkbox("Gemini live Google search", value=False, key="gemweb",
+                          help="Gemini searches the web and returns links, shown as sources.")
     shots = st.file_uploader("Screenshots (optional, layout only, not proof of sales)",
                              type=["png", "jpg", "jpeg", "webp"], accept_multiple_files=True, key="shots")
 
@@ -214,29 +235,24 @@ with tab_make:
 
     st.markdown("#### 4. Options")
     notes = st.text_input("Notes for this run (optional)", key="notes")
-    pins_on = st.checkbox("Make Pinterest pins too", value=True, key="pins_on")
-    allow_second = st.checkbox("Allow a second approved product today", value=False, key="second")
+    pins_on = st.checkbox("Make Pinterest pins and the image brief too", value=True, key="pins_on")
 
     b1, b2 = st.columns(2)
     run_clicked = b1.button("Make today's product", type="primary", key="btn_run")
     resume_clicked = b2.button("Continue from where it stopped", key="btn_resume")
 
     if run_clicked:
-        if len(store.approved_today()) >= store.DAILY_LIMIT and not allow_second:
-            st.warning("One product is already approved today. Tick 'allow a second product today' to make another.")
+        if today_count >= store.DAILY_LIMIT:
+            st.warning(f"Today's limit of {store.DAILY_LIMIT} products is reached. Approve tomorrow's products tomorrow.")
         else:
-            web_text, web_items = "", []
-            if use_web and tav_key:
-                try:
-                    with st.spinner("Searching the web..."):
-                        web_text = engine.tavily(tav_key, f"{audience} {currency} contractor spreadsheet", web_items)
-                except Exception as e:
-                    st.warning("Web search failed; continuing without it: " + engine.scrub(e, keys_all))
+            web_text_unused = ""
             state = brains.new_state(fixed_key)
-            state["product_fixed"] = fixed_key is not None
-            state["pins_on"] = pins_on
-            state["inputs"] = {"mode": mode, "pasted": pasted or "", "source": source, "web_text": web_text,
-                               "web_items": web_items, "gemini_search": bool(use_gem), "gemini_sources": []}
+            style, style_changes = sheets.refine_style(store.last_style(proj))
+            state["style"], state["style_changes"] = style, style_changes
+            state["inputs"] = {"mode": mode, "pasted": pasted or "", "source": source, "passes": passes,
+                               "use_web": bool(use_web), "gemini_search": bool(use_gem), "gemini_sources": [],
+                               "web_items": 0}
+            state["trade"] = trade_key
             proj["run"] = state
             resume_clicked = True
     if resume_clicked and proj.get("run") is None:
@@ -254,17 +270,20 @@ with tab_make:
                 "product_fixed": bool(state.get("product_fixed")),
                 "product_title": brains.PRODUCT_TITLES.get(state["product"], "one of the four products (the brain chooses)")
                 if state.get("product_fixed") else "one of the four products (the brain chooses)",
-                "audience": audience, "currency": currency, "business": business,
-                "markets": ", ".join(markets) or "not chosen",
-                "research_text": inp.get("pasted", ""), "source": inp.get("source", ""),
-                "web_text": inp.get("web_text", ""),
-                "shot_note": f"{len(imgs)} attached (layout only)" if imgs else "none",
+                "trade": state.get("trade", trade_key), "trade_label": sheets.TRADES[state.get("trade", trade_key)]["label"],
+                "brand": brand, "business": brand, "currency": currency, "market": market,
+                "audience": trade_label, "research_text": inp.get("pasted", ""), "source": inp.get("source", ""),
+                "research_passes": inp.get("passes", passes), "use_web": inp.get("use_web", False),
+                "tavily_key": tav_key, "shot_note": f"{len(imgs)} attached (layout only)" if imgs else "none",
                 "images": imgs, "complaints": complaints, "prev": prev,
-                "prev_theme": prev["theme"] if prev else None,
+                "prev_theme": None, "prev_style": store.last_style(proj),
                 "recent": store.last_versions(proj), "results_text": store.results_summary(proj),
                 "slots": slots, "log": ss["log"], "keys": keys_all,
                 "owner_notes": notes or proj.get("pending_notes", ""), "fix_notes": [],
                 "grounding": bool(inp.get("gemini_search")), "sources": list(inp.get("gemini_sources", [])),
+                "style": state.get("style") or sheets.refine_style(store.last_style(proj))[0],
+                "style_changes": state.get("style_changes", []),
+                "markets": market,
             }
             proj["pending_notes"] = ""
             with st.spinner("The brains are working. Each step is saved, so a stop can be continued."):
@@ -272,6 +291,9 @@ with tab_make:
             inp["gemini_sources"] = ctx["sources"]
             state["inputs"] = inp
             store.save_project(proj)
+            if ctx.get("notes"):
+                for line in ctx["notes"][:3]:
+                    st.caption(line)
             if status == "error":
                 st.error("A brain stopped. Read the message below, then press 'Continue from where it stopped'.")
             elif status == "waiting_approval":
@@ -281,44 +303,47 @@ with tab_make:
 
     state = proj.get("run")
     if state:
-        total = 8 if state.get("pins_on", True) else 7
-        done = len([k for k in state["brains"] if int(k) <= 8])
-        st.progress(min(done / total, 1.0), text=f"{done} of {total} brains done · status: {state['status']}")
+        total = 9 if state.get("pins_on", True) else 8
+        done = len([k for k in state["brains"] if int(k) <= 9])
+        st.progress(min(done / total, 1.0), text=f"{done} of {total} AI brains done · status: {state['status']}")
         inp = state.get("inputs", {})
         with st.expander("Research used in this run", expanded=bool(inp)):
-            st.write(f"- Pasted research: {len(inp.get('pasted', ''))} characters (source: {inp.get('source', '') or 'owner'})")
-            st.write(f"- Web search (Tavily): {len(inp.get('web_items', []))} results")
-            st.write(f"- Gemini live search: {'on' if inp.get('gemini_search') else 'off'}, sources found: {len(inp.get('gemini_sources', []))}")
+            st.write(f"- Passes requested: {inp.get('passes', '-')} · pasted research: "
+                     f"{len(inp.get('pasted', ''))} characters (source: {inp.get('source', '') or 'owner'})")
+            st.write(f"- Gemini live search: {'on' if inp.get('gemini_search') else 'off'}, "
+                     f"sources found: {len(inp.get('gemini_sources', []))}")
             for s_ in inp.get("gemini_sources", [])[:8]:
                 st.write(f"  - {s_.get('title', '')} {s_.get('url', '')}")
-            for w_ in inp.get("web_items", [])[:8]:
-                st.write(f"  - {w_.get('title', '')} {w_.get('url', '')}")
             if "1" in state["brains"]:
-                st.caption(f"Brain 1 answered by: {state['brains']['1']['slot']}")
+                d1 = state["brains"]["1"]["data"]
+                st.table([{"pass": i + 1, "angle": p["angle"], "items": p["items"], "web results": p["web"],
+                           "answered by": p["slot"]} for i, p in enumerate(d1.get("passes", []))])
+                st.caption(f"Merged evidence items: {len(d1.get('items', []))}")
 
         st.markdown("#### Brains")
         rows = []
-        for n in range(1, 9):
-            if n == 8 and not state.get("pins_on", True) and "8" not in state["brains"]:
+        for n in range(1, 10):
+            if n == 9 and not state.get("pins_on", True) and "9" not in state["brains"]:
                 continue
             b = state["brains"].get(str(n))
             rows.append({"brain": n, "name": brains.BRAIN_NAMES[n], "status": "done" if b else "waiting",
                          "answered by": b["slot"] if b else state["slots"].get(str(n), "")})
-        rows.append({"brain": 9, "name": "Critic and gate", "status": "done" if state.get("checks") else "waiting",
-                     "answered by": "code (+ AI critic if ready)"})
-        rows.append({"brain": 10, "name": "Package", "status": "after approval", "answered by": "code"})
+        for n in (10, 11, 12):
+            rows.append({"brain": n, "name": brains.BRAIN_NAMES[n],
+                         "status": "done" if state.get("checks") and n == 11 else "after the AI brains",
+                         "answered by": "code"})
         st.table(rows)
         for e in state.get("errors", []):
             st.error(f"Brain {e['brain']} ({e['name']}) at {e['at']}: {e['msg']}")
         if state.get("product"):
             st.caption(f"Product: {brains.PRODUCT_TITLES.get(state['product'], state['product'])} · "
-                       f"Fix rounds used: {state.get('fix_round', 0)}")
+                       f"Fix rounds used: {state.get('fix_round', 0)} · "
+                       f"File style: " + ("; ".join(state.get("style_changes", [])) or "unchanged"))
 
-        if state["status"] in ("waiting_approval", "blocked") and "3" in state["brains"]:
-            plan = state["brains"]["3"]["data"]
-            theme = plan["theme"]
-            st.markdown(f"<span class='bf-chip' style='background:{THEME_COLOURS.get(theme, '#173B75')}'>"
-                        f"theme: {theme}</span> **Plan:** {plan['summary']}", unsafe_allow_html=True)
+        if state["status"] in ("waiting_approval", "blocked") and "4" in state["brains"]:
+            plan = state["brains"]["4"]["data"]
+            st.markdown(f"{chip('trade: ' + sheets.TRADES[state.get('trade', trade_key)]['label'], sheets.TRADES[state.get('trade', trade_key)]['primary'])} "
+                        f"**Plan:** {plan['summary']}", unsafe_allow_html=True)
             if plan.get("results_considered"):
                 st.info(f"What past results taught: {plan['results_considered']}")
             st.markdown("**What is different from the last version**")
@@ -336,12 +361,14 @@ with tab_make:
             if state["status"] == "waiting_approval":
                 if st.button("Approve and save this product", type="primary", key="btn_approve"):
                     version_no = len(proj["versions"]) + 1
-                    zip_bytes, manifest = brains.build_package({"currency": currency, "business": business},
-                                                               state, version_no)
+                    ctx_pkg = {"currency": currency, "business": brand, "brand": brand, "trade": state.get("trade", trade_key),
+                               "style": state.get("style", {})}
+                    zip_bytes, manifest = brains.build_package(ctx_pkg, state, version_no)
                     types = sorted({c["type"] for c in plan["changes"]})
                     proj["versions"].append({
                         "v": version_no, "date": store.today(), "at": store.now(), "product": state["product"],
-                        "theme": theme, "types": types, "summary": plan["summary"],
+                        "trade": state.get("trade", trade_key), "style": state.get("style", {}),
+                        "types": types, "summary": plan["summary"],
                         "results_considered": plan.get("results_considered", ""),
                         "brains": state["brains"], "checks": state["checks"], "manifest": manifest,
                         "results": [], "approved": True})
@@ -350,15 +377,14 @@ with tab_make:
                     store.save_project(proj)
                     backup = store.backup_version(proj, version_no)
                     store.record_daily({"date": store.today(), "project": proj["id"], "v": version_no,
-                                        "product": state["product"], "theme": theme, "types": types,
-                                        "approved": True})
+                                        "product": state["product"], "types": types, "approved": True})
                     ss["pkg"], ss["pkg_name"] = zip_bytes, f"{store.today()}_{state['product']}_v{version_no}"
                     ss["flash"] = ("success", f"Version {version_no} approved. Backup saved: {backup}")
                     st.rerun()
             notes_back = st.text_input("Send back with notes (the brains redo the plan and the text)",
                                        key="sendback")
             if st.button("Send back with these notes", key="btn_sendback") and notes_back.strip():
-                for n in range(3, 9):
+                for n in range(4, 10):
                     state["brains"].pop(str(n), None)
                 state["status"] = "idle"
                 state["fix_round"] = 0
@@ -386,9 +412,8 @@ with tab_make:
     if proj["versions"]:
         st.markdown("#### Approved versions of this project")
         for v in reversed(proj["versions"]):
-            chip = THEME_COLOURS.get(v["theme"], "#173B75")
-            st.markdown(f"<span class='bf-chip' style='background:{chip}'>v{v['v']}</span> "
-                        f"{v['date']} · {v['product']} · {v['theme']} · {', '.join(v['types'])}",
+            tcol = sheets.TRADES.get(v.get("trade", "plumb_elec"), sheets.TRADES["plumb_elec"])["primary"]
+            st.markdown(f"{chip('v' + str(v['v']), tcol)} {v['date']} · {v['product']} · {', '.join(v['types'])}",
                         unsafe_allow_html=True)
 
 # ================= TAB: results
@@ -399,7 +424,7 @@ with tab_results:
     if not proj["versions"]:
         st.info("No approved version yet. Results appear after you approve a product.")
     else:
-        options = {f"v{v['v']} · {v['product']} · {v['theme']} · {v['date']}": v["v"] for v in proj["versions"]}
+        options = {f"v{v['v']} · {v['product']} · {v['date']}": v["v"] for v in proj["versions"]}
         pick = st.selectbox("Version", list(options.keys()), key="res_pick")
         c1, c2 = st.columns(2)
         day = c1.text_input("Date", store.today(), key="res_date")
@@ -449,7 +474,7 @@ with tab_projects:
 # ================= TAB: chat
 with tab_chat:
     st.subheader("Chat")
-    st.caption("Ask in Urdu or English. The chat knows this project: versions, results and open complaints.")
+    st.caption("Ask in Urdu or English. The chat knows this project: trade, versions, results and open complaints.")
     for m in proj["chat"]:
         with st.chat_message(m["role"]):
             st.markdown(m["content"])
@@ -457,8 +482,9 @@ with tab_chat:
     if msg:
         proj["chat"].append({"role": "user", "content": msg})
         last = proj["versions"][-1] if proj["versions"] else None
-        context = (f"PRODUCT TITLES: {', '.join(brains.PRODUCT_TITLES.values())}\n"
-                   f"AUDIENCE: {proj['audience']} | CURRENCY: {proj['currency']} | MARKETS: {', '.join(proj['markets'])}\n"
+        context = (f"TRADE: {sheets.TRADES.get(proj.get('trade', 'plumb_elec'))['label']}\n"
+                   f"PRODUCT TITLES: {', '.join(brains.PRODUCT_TITLES.values())}\n"
+                   f"MARKET: {proj.get('market', '')} | CURRENCY: {proj.get('currency', '')}\n"
                    f"OPEN COMPLAINTS: {'; '.join(proj['complaints']) or 'none'}\n"
                    f"ANSWERED COMPLAINTS: {'; '.join(c['text'] for c in proj.get('complaint_log', [])) or 'none'}\n"
                    f"RESULTS:\n{store.results_summary(proj)}\n"
@@ -493,7 +519,8 @@ with tab_api:
     for s in slots:
         status = "ready" if (s["key"] and s["model"] and (s["kind"] == "gemini" or s["base"])) else "not ready"
         rows.append({"slot": s["name"], "used for": ", ".join(s["duties"]) or "backup only", "status": status})
-    rows.append({"slot": "Tavily", "used for": "web search", "status": "ready" if tav_key else "not ready"})
+    rows.append({"slot": "Tavily", "used for": "web search (one per research pass)",
+                 "status": "ready" if tav_key else "not ready"})
     st.table(rows)
     if st.button("Test all ready slots", type="primary", key="btn_test_all"):
         if not ready and not tav_key:
@@ -532,6 +559,6 @@ with tab_api:
 # ================= TAB: daily log
 with tab_log:
     st.subheader("Daily log")
-    st.caption("One line per approved product. The brains read the last seven lines to avoid repeats.")
+    st.caption(f"Up to {store.DAILY_LIMIT} approved products a day. The brains read the last seven lines to avoid repeats.")
     entries = store.daily_log()
-    st.table(entries[-60:][::-1] or [{"date": "none yet", "product": "", "theme": "", "approved": ""}])
+    st.table(entries[-60:][::-1] or [{"date": "none yet", "product": "", "approved": ""}])

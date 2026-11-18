@@ -16,7 +16,7 @@ PROJECTS = os.path.join(DATA, "projects")
 BACKUPS = os.path.join(DATA, "backups")
 DAILY = os.path.join(DATA, "daily_log.json")
 SCHEMA = 5
-DAILY_LIMIT = 1      # one approved product per day; the owner may allow a second one
+DAILY_LIMIT = 5      # up to five approved products a day; each one still needs the owner's approval
 MIN_VIEWS = 100      # no judgement below this many views
 
 
@@ -194,3 +194,11 @@ def record_daily(entry):
 def approved_today(day=None):
     day = day or today()
     return [e for e in daily_log() if e.get("date") == day and e.get("approved")]
+
+
+def last_style(p):
+    """The file style of the last approved version (None for the first version)."""
+    for v in reversed(p.get("versions", [])):
+        if v.get("style"):
+            return v["style"]
+    return None

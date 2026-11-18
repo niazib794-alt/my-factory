@@ -1,7 +1,7 @@
-"""Business Factory 3 - workbook builder (.xlsx for Google Sheets and Excel).
+"""Business Factory 5 - workbook builder (.xlsx for Google Sheets and Excel).
 
 One file per product. Real formulas, no hard-coded results.
-Yellow cells: the buyer types. Blue cells: automatic formulas, locked.
+Coloured cells: the buyer types. Grey cells: automatic formulas, locked.
 Each table holds 300 rows. Dashboards read the same rows.
 No Streamlit code here, so this file can be tested on its own.
 """
@@ -17,7 +17,7 @@ N_ROWS = 300
 FIRST = 4                      # first data row (Excel numbering)
 LAST = FIRST + N_ROWS - 1      # last data row (303)
 FONT = "Arial"
-YELLOW, BLUE, GREY = "FFF2CC", "DBEAFE", "F1F5F9"
+YELLOW, BLUE, GREY = "FFF2CC", "E2E8F0", "F1F5F9"
 NAVY, HEAD = "173B75", "1E3A8A"
 SYMBOL = {"USD": "$", "CAD": "CA$", "GBP": "£", "EUR": "€", "AUD": "A$"}
 
@@ -42,15 +42,15 @@ KIND_NAME = {"text": "text", "date": "date", "money": "money", "num": "number", 
 
 # kind -> (fill colour, number format, editable by the buyer)
 KINDS = {
-    "text": (YELLOW, "General", True),
-    "date": (YELLOW, "yyyy-mm-dd", True),
-    "money": (YELLOW, "MONEY", True),
-    "num": (YELLOW, "0.00", True),
-    "pct": (YELLOW, "0.0%", True),
-    "c_money": (BLUE, "MONEY", False),
-    "c_pct": (BLUE, "0.0%", False),
-    "c_int": (BLUE, "0", False),
-    "c_text": (BLUE, "General", False),
+    "text": ("IN", "General", True),
+    "date": ("IN", "yyyy-mm-dd", True),
+    "money": ("IN", "MONEY", True),
+    "num": ("IN", "0.00", True),
+    "pct": ("IN", "0.0%", True),
+    "c_money": ("CALC", "MONEY", False),
+    "c_pct": ("CALC", "0.0%", False),
+    "c_int": ("CALC", "0", False),
+    "c_text": ("CALC", "General", False),
 }
 
 # Each column: (header, kind, width, formula or None, dropdown list or None). {r} = Excel row number.
@@ -119,11 +119,11 @@ COLUMNS = {
 }
 
 HINTS = {
-    JOB: "Yellow = type here. Blue = automatic. One row per job. Client / Job is required. "
+    JOB: "Yellow cells = type here. Grey cells = automatic. One row per job. Client / Job is required. "
          "Leave Overhead % blank to use the default in Settings.",
-    EXTRA: "Yellow = type here. Blue = automatic. One row per extra-work request. Choose Approved only "
+    EXTRA: "Yellow cells = type here. Grey cells = automatic. One row per extra-work request. Choose Approved only "
            "after the client agrees, then type the approved amount.",
-    INV: "Yellow = type here. Blue = automatic. One row per invoice. Invoice amount is required. "
+    INV: "Yellow cells = type here. Grey cells = automatic. One row per invoice. Invoice amount is required. "
          "Status and aging update every day, using today's date.",
 }
 
@@ -150,19 +150,45 @@ PROTECT_ON = True
 VALIDATIONS_ON = True
 CONDITIONAL_ON = True
 OVERRIDE_TEXT = {}  # brain text: start lines and tab hints
-THEMES = {  # (title colour, header colour). Only titles and headers change; the legend colours stay fixed.
-    "blue": ("173B75", "1E3A8A"),
-    "green": ("14532D", "166534"),
-    "purple": ("4C1D95", "5B21B6"),
-    "teal": ("134E4A", "0F766E"),
-    "amber": ("78350F", "92400E"),
-    "rose": ("881337", "9F1239"),
+BRAND_DEFAULT = "Gripco"
+FORMULA_FILL = "E2E8F0"  # grey: automatic cells in every file
+TRADES = {  # header colour (primary), accent, example job, pin palette wording
+    "plumb_elec": {"label": "Plumbers & Electricians", "primary": "1E3A8A", "accent": "F59E0B",
+                   "example": "Kitchen sink repair", "palette": "navy blue headers with amber gold accents"},
+    "hvac": {"label": "HVAC & AC Repair Technicians", "primary": "0F766E", "accent": "475569",
+             "example": "AC unit service call", "palette": "teal blue headers with cool grey accents"},
+    "general": {"label": "General Contractors & Builders", "primary": "166534", "accent": "334155",
+                "example": "Bathroom remodel, phase 1", "palette": "forest green headers with slate charcoal accents"},
+    "roofing": {"label": "Roofing & Siding Contractors", "primary": "991B1B", "accent": "FEF3C7",
+                "example": "Roof leak repair", "palette": "crimson red headers with warm cream accents"},
+    "landscape": {"label": "Landscaping & Lawn Care Services", "primary": "047857", "accent": "4D7C0F",
+                  "example": "Monthly lawn mowing add-on", "palette": "emerald green headers with earthy olive accents"},
+    "painters": {"label": "Painters & Drywall Contractors", "primary": "3730A3", "accent": "E0F2FE",
+                 "example": "Hallway repaint and patch", "palette": "royal indigo headers with soft sky blue accents"},
+    "handyman": {"label": "Handyman & Home Repair Services", "primary": "C2410C", "accent": "F3F4F6",
+                 "example": "Replace a door lock", "palette": "burnt orange headers with neutral sand accents"},
+    "other": {"label": "Other trade (neutral)", "primary": "1F2937", "accent": "E5E7EB",
+              "example": "Your own job", "palette": "charcoal headers with light grey accents"},
 }
+TRADE_LABELS = [v["label"] for v in TRADES.values()]
+DEFAULT_STYLE = {"phone_font": 13, "phone_row": 30, "phone_min_width": 12, "phone_border": "D1D5DB"}
+BORDER_CYCLE = ["D1D5DB", "CBD5E1", "B8C4D6", "9AA8BC"]
+BRAND = BRAND_DEFAULT
+TRADE = "plumb_elec"
+LAYOUT_NOW = "laptop"
+STYLE = dict(DEFAULT_STYLE)
+PHONE_BORDER = Border(bottom=Side(style="thin", color=DEFAULT_STYLE["phone_border"]))
+ACCENT_FILL, ACCENT_FONT = "F59E0B", "FFFFFF"
+DASH_TAB = "F59E0B"
 LAYOUTS = ("laptop", "phone")
 LAYOUT_NOTE = {
     "laptop": "Laptop file: wider columns, more of the table on screen at once.",
     "phone": "Phone file: narrower columns and taller rows, easier to tap and scroll on a phone.",
 }
+
+
+def _box():
+    return PHONE_BORDER if LAYOUT_NOW == "phone" else BOX
 
 
 def _width(w, layout):
@@ -183,10 +209,10 @@ def _money(cur):
 
 def _style(cell, kind, cur):
     fill, nf, editable = KINDS[kind]
-    cell.fill = _fill(fill)
+    cell.fill = _fill(YELLOW if fill == "IN" else BLUE)
     cell.font = _font()
     cell.number_format = _money(cur) if nf == "MONEY" else nf
-    cell.border = BOX
+    cell.border = _box()
     cell.alignment = Alignment(vertical="center", wrap_text=(kind == "text"))
     cell.protection = Protection(locked=not editable)
 
@@ -212,9 +238,10 @@ def _rules(name):
 def _data_sheet(wb, name, cur, layout="laptop"):
     cols = COLUMNS[name]
     ws = wb.create_sheet(name)
+    ws.sheet_view.showGridLines = LAYOUT_NOW != "phone"
     last = get_column_letter(len(cols))
     ws.merge_cells(f"A1:{last}1")
-    ws["A1"] = f"{name.upper()} • ENTER DATA IN YELLOW CELLS"
+    ws["A1"] = f"{name.upper()} • ENTER DATA IN THE YELLOW CELLS"
     ws["A1"].font = _font(True, 14, "FFFFFF")
     ws["A1"].fill = _fill(NAVY)
     ws["A1"].alignment = Alignment(vertical="center")
@@ -229,13 +256,14 @@ def _data_sheet(wb, name, cur, layout="laptop"):
         h.font = _font(True, 10, "FFFFFF")
         h.fill = _fill(HEAD)
         h.alignment = Alignment(wrap_text=True, vertical="center", horizontal="center")
-        h.border = BOX
+        h.border = _box()
         h.protection = Protection(locked=True)
-        ws.column_dimensions[get_column_letter(ci)].width = _width(spec[2], layout)
+        ws.column_dimensions[get_column_letter(ci)].width = (
+            max(STYLE["phone_min_width"], _width(spec[2], layout)) if layout == "phone" else _width(spec[2], layout))
     ws.row_dimensions[3].height = 44
     if layout == "phone":
         for r in range(FIRST, LAST + 1):
-            ws.row_dimensions[r].height = 24
+            ws.row_dimensions[r].height = STYLE["phone_row"]
     for r in range(FIRST, LAST + 1):
         for ci, spec in enumerate(cols, 1):
             cell = ws.cell(row=r, column=ci)
@@ -257,6 +285,13 @@ def _data_sheet(wb, name, cur, layout="laptop"):
             dv.add(f"{col}{FIRST}:{col}{LAST}")
     for rng, rule in (_rules(name) if CONDITIONAL_ON else []):
         ws.conditional_formatting.add(rng, rule)
+    if layout == "phone":
+        for r in range(FIRST, LAST + 1):
+            for ci in range(1, len(cols) + 1):
+                c = ws.cell(row=r, column=ci)
+                c.font = _font(bool(c.font.b), STYLE["phone_font"], "0F172A", bool(c.font.i))
+        for ci in range(1, len(cols) + 1):
+            ws.cell(row=3, column=ci).font = _font(True, 12, "FFFFFF")
     ws.freeze_panes = f"{'B' if layout == 'phone' else 'C'}{FIRST}"
     ws.auto_filter.ref = f"A3:{last}{LAST}"
     ws.protection.sheet = PROTECT_ON
@@ -269,7 +304,7 @@ def _data_sheet(wb, name, cur, layout="laptop"):
 def _settings_sheet(wb, cur, business):
     ws = wb.create_sheet(SET)
     ws.merge_cells("A1:C1")
-    ws["A1"] = "SETTINGS • change the yellow cells only"
+    ws["A1"] = f"SETTINGS • {BRAND} • change the yellow cells only"
     ws["A1"].font = _font(True, 14, "FFFFFF")
     ws["A1"].fill = _fill(NAVY)
     ws.row_dimensions[1].height = 30
@@ -277,7 +312,7 @@ def _settings_sheet(wb, cur, business):
         c = ws.cell(row=3, column=ci, value=h)
         c.font = _font(True, 10, "FFFFFF")
         c.fill = _fill(HEAD)
-        c.border = BOX
+        c.border = _box()
         c.alignment = Alignment(vertical="center", horizontal="center")
     rows = [  # row 4..8: the job-costing formulas read B4, B5 and B6
         ("Overhead method", "Direct cost", "text",
@@ -288,23 +323,27 @@ def _settings_sheet(wb, cur, business):
          "The Dashboard counts jobs below this margin. 30% is only an example. Set your own target."),
         ("Your business name", business, "text", "Shown on START HERE and in the Dashboard title."),
         ("Currency", cur, "c_text", "Set when this file was built. To change it, build the file again."),
+        ("Trade", TRADES[TRADE]["label"], "text", "Your trade. Pick one from the list. It sets the header colours."),
     ]
     for i, (label, value, kind, note) in enumerate(rows, 4):
         a = ws.cell(row=i, column=1, value=label)
         a.font = _font(True)
-        a.border = BOX
+        a.border = _box()
         a.alignment = Alignment(vertical="center")
         b = ws.cell(row=i, column=2, value=value)
         _style(b, kind, cur)
         c = ws.cell(row=i, column=3, value=note)
         c.font = _font(False, 9, "475569", True)
-        c.border = BOX
+        c.border = _box()
         c.alignment = Alignment(wrap_text=True, vertical="center")
         ws.row_dimensions[i].height = 30
     if VALIDATIONS_ON:
         dv = DataValidation(type="list", formula1='"Direct cost,Quote"', allow_blank=False)
         ws.add_data_validation(dv)
         dv.add("B4")
+        dvt = DataValidation(type="list", formula1='"' + ",".join(TRADE_LABELS) + '"', allow_blank=False)
+        ws.add_data_validation(dvt)
+        dvt.add("B9")
     ws.column_dimensions["A"].width = 26
     ws.column_dimensions["B"].width = 22
     ws.column_dimensions["C"].width = 72
@@ -362,7 +401,7 @@ def dashboard_blocks(module):
 def _dashboard_sheet(wb, module, cur, business, layout="laptop"):
     ws = wb.create_sheet(DASH)
     ws.merge_cells("A1:C1")
-    ws["A1"] = "DASHBOARD • automatic, do not type here"
+    ws["A1"] = f"DASHBOARD • {BRAND} • automatic, do not type here"
     ws["A1"].font = _font(True, 13, "FFFFFF")
     ws["A1"].fill = _fill(NAVY)
     ws.row_dimensions[1].height = 30
@@ -373,18 +412,18 @@ def _dashboard_sheet(wb, module, cur, business, layout="laptop"):
     for title, items in dashboard_blocks(module):
         ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=3)
         c = ws.cell(row=row, column=1, value=title)
-        c.font = _font(True, 11, "FFFFFF")
-        c.fill = _fill(HEAD)
+        c.font = _font(True, 11, ACCENT_FONT)
+        c.fill = _fill(ACCENT_FILL)
         row += 1
         for label, formula, kind, note in items:
             a = ws.cell(row=row, column=1, value=label)
             a.font = _font()
-            a.border = BOX
+            a.border = _box()
             b = ws.cell(row=row, column=2, value=formula)
             _style(b, kind, cur)
             n = ws.cell(row=row, column=3, value=note)
             n.font = _font(False, 9, "475569", True)
-            n.border = BOX
+            n.border = _box()
             row += 1
         row += 1
     if module in ("job_costing", "bundle"):
@@ -404,13 +443,14 @@ def _start_sheet(ws, module, cur, business, layout="laptop"):
     ws.sheet_view.showGridLines = False
     ws.column_dimensions["A"].width = 105
     rows = [
-        ("title", "START HERE"),
+        ("title", f"START HERE • {BRAND}"),
         ("head", PRODUCT_NAMES[module]),
+        ("text", f"Trade: {TRADES[TRADE]['label']}. Example job: {TRADES[TRADE]['example']}."),
         ("text", "Download this file, upload it to Google Drive, open it in Google Sheets (or Excel), "
                  "then make your own copy before you type."),
         ("head", "Colour guide"),
         ("in", "Yellow cell = type here."),
-        ("calc", "Blue cell = automatic. Do not type in blue cells."),
+        ("calc", "Grey cell = automatic. Do not type in grey cells."),
         ("text", LAYOUT_NOTE[layout]),
         ("head", "Steps"),
         ("text", "1. Open Settings. Check the yellow values: business name, overhead method, default "
@@ -454,24 +494,37 @@ def _start_sheet(ws, module, cur, business, layout="laptop"):
     ws.protection.sheet = PROTECT_ON
 
 
-def build_workbook(module, currency="USD", business="My Business", layout="laptop",
-                   theme="blue", protect=True, validations=True, conditional=True, text=None):
+def build_workbook(module, currency="USD", business=None, layout="laptop", theme=None,
+                   protect=True, validations=True, conditional=True, text=None,
+                   trade="plumb_elec", style=None, brand=None):
     """Return the .xlsx file as bytes.
 
-    layout: "laptop" or "phone". theme: a key of THEMES (titles and headers only).
-    protect, validations, conditional: switch off for the plain test variants.
+    layout: "laptop" or "phone". trade: a key of TRADES (header colours). style: from refine_style().
+    text: brain text (start_lines, hints). protect / validations / conditional: off for the test variants.
+    theme is accepted for old callers and ignored.
     """
-    global PROTECT_ON, VALIDATIONS_ON, CONDITIONAL_ON, NAVY, HEAD
-    PROTECT_ON, VALIDATIONS_ON, CONDITIONAL_ON = bool(protect), bool(validations), bool(conditional)
-    NAVY, HEAD = THEMES.get(theme, THEMES["blue"])
-    global OVERRIDE_TEXT
-    OVERRIDE_TEXT = dict(text or {})
+    global PROTECT_ON, VALIDATIONS_ON, CONDITIONAL_ON, NAVY, HEAD, BRAND, TRADE, LAYOUT_NOW, STYLE
+    global PHONE_BORDER, ACCENT_FILL, ACCENT_FONT, DASH_TAB, OVERRIDE_TEXT
     if module not in PRODUCT_SHEETS:
         raise ValueError(f"unknown product: {module}")
     if layout not in LAYOUTS:
         raise ValueError(f"unknown layout: {layout}")
+    if trade not in TRADES:
+        raise ValueError(f"unknown trade: {trade}")
+    BRAND = brand or BRAND_DEFAULT
+    business = business or BRAND
+    PROTECT_ON, VALIDATIONS_ON, CONDITIONAL_ON = bool(protect), bool(validations), bool(conditional)
+    TRADE = trade
+    t = TRADES[trade]
+    NAVY = HEAD = t["primary"]
+    ACCENT_FILL, ACCENT_FONT = accent_pair(trade)
+    LAYOUT_NOW = layout
+    STYLE = dict(DEFAULT_STYLE, **(style or {}))
+    PHONE_BORDER = Border(bottom=Side(style="thin", color=STYLE["phone_border"]))
+    DASH_TAB = t["accent"] if contrast(t["accent"], "FFFFFF") >= 3 else t["primary"]
+    OVERRIDE_TEXT = dict(text or {})
     wb = Workbook()
-    wb.properties.creator = business
+    wb.properties.creator = BRAND
     wb.properties.title = PRODUCT_NAMES[module]
     start = wb.active
     start.title = START
@@ -480,6 +533,11 @@ def build_workbook(module, currency="USD", business="My Business", layout="lapto
     for name in PRODUCT_SHEETS[module]:
         _data_sheet(wb, name, currency, layout)
     _dashboard_sheet(wb, module, currency, business, layout)
+    wb[START].sheet_properties.tabColor = NAVY
+    wb[SET].sheet_properties.tabColor = "64748B"
+    for name in PRODUCT_SHEETS[module]:
+        wb[name].sheet_properties.tabColor = HEAD
+    wb[DASH].sheet_properties.tabColor = DASH_TAB
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
@@ -494,7 +552,7 @@ def spec_text(module, currency="USD", business="My Business"):
     """Plain-text specification generated from the same code that builds the file."""
     sym = SYMBOL.get(currency, "$")
     out = [f"SHEET SPECIFICATION • {PRODUCT_NAMES[module]}",
-           f"Business: {business} | Currency: {currency} ({sym})", "",
+           f"Business: {business} | Trade: {TRADES[TRADE]['label']} | Currency: {currency} ({sym})", "",
            "Tabs, in order:",
            f"1. {START}: instructions, colour guide, example row (text only)",
            f"2. {SET}: overhead method (Direct cost or Quote), default overhead %, target profit margin, "
@@ -518,7 +576,119 @@ def spec_text(module, currency="USD", business="My Business"):
         out.append(f"  {title}")
         for label, _, _, note in items:
             out.append(f"    - {label}" + (f" ({note})" if note else ""))
-    out += ["", "PROTECTION: formula cells are locked without a password. Yellow cells stay editable.",
+    out += ["", "PROTECTION: formula cells are locked without a password. Yellow input cells stay editable.",
             "WARNINGS BUILT IN: loss jobs, jobs below target margin, overdue invoices, "
             "approved extra work with no amount."]
     return "\n".join(out)
+
+
+# ---------------- checks and helpers (version 6)
+def _lum(hex_):
+    vals = []
+    for i in (0, 2, 4):
+        c = int(hex_[i:i + 2], 16) / 255
+        vals.append(c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4)
+    return 0.2126 * vals[0] + 0.7152 * vals[1] + 0.0722 * vals[2]
+
+
+def contrast(a, b):
+    """WCAG contrast ratio between two hex colours."""
+    hi, lo = sorted((_lum(a), _lum(b)), reverse=True)
+    return round((hi + 0.05) / (lo + 0.05), 2)
+
+
+def accent_pair(trade):
+    """Accent fill, and the text colour that reads on it (4.5:1 where the palette allows)."""
+    t = TRADES[trade]
+    acc, pri = t["accent"], t["primary"]
+    if contrast(acc, "FFFFFF") >= 4.5:
+        return acc, "FFFFFF"
+    if contrast(pri, acc) >= 4.5:
+        return acc, pri
+    return acc, "0F172A"
+
+
+def palette_problems(trade):
+    """Checks on one trade palette. Returns (check, status, detail) rows."""
+    t = TRADES[trade]
+    out = []
+    c = contrast(t["primary"], "FFFFFF")
+    out.append(("Header text contrast", "PASS" if c >= 4.5 else "FIX",
+                f"white on {t['primary']}: {c}:1 (needs 4.5:1)"))
+    for label, other in (("input yellow", YELLOW), ("formula grey", FORMULA_FILL)):
+        c = contrast(t["accent"], other)
+        out.append((f"Accent vs {label}", "PASS" if c >= 1.15 else "WARNING",
+                    f"{t['accent']} vs {other}: {c}:1" + ("" if c >= 1.15 else
+                    " (too close: buyers may read the accent as an input cell)")))
+    return out
+
+
+FORBIDDEN_CLAIMS = ["overtime", "benefit", "union", "apprentice", "offline", "prevent", "avoid dispute",
+                    "boost", "guarantee"]
+REQUIRED_TERMS = {"approv": ["approv"], "invoice": ["invoice"], "aging": ["aging", "ageing"],
+                  "margin": ["margin"], "profit": ["profit"], "labor": ["labor", "labour"]}
+
+
+def start_text_problems(lines, headers, dashboard_labels=()):
+    """START HERE must match the workbook: no unsupported claims, and every topic it names must exist."""
+    haystack = [h.lower() for h in list(headers) + list(dashboard_labels) if h]
+    probs = []
+    for line in lines:
+        low = str(line).lower()
+        for word in FORBIDDEN_CLAIMS:
+            if word in low:
+                probs.append(f"'{word}' is not in the workbook: {str(line)[:70]}")
+        for key, terms in REQUIRED_TERMS.items():
+            if key in low and not any(term in h for term in terms for h in haystack):
+                probs.append(f"'{key}' is named but no column or Dashboard item covers it: {str(line)[:70]}")
+    return probs[:12]
+
+
+def refine_style(prev=None):
+    """One small step from the previous file style. Never goes backwards, always changes something."""
+    before = dict(DEFAULT_STYLE, **(prev or {}))
+    p = dict(before)
+    if p["phone_font"] < 14:
+        p["phone_font"] += 1
+    if p["phone_row"] < 34:
+        p["phone_row"] += 2
+    if p["phone_min_width"] < 14:
+        p["phone_min_width"] += 1
+    if p == before:
+        i = BORDER_CYCLE.index(p["phone_border"]) if p["phone_border"] in BORDER_CYCLE else 0
+        p["phone_border"] = BORDER_CYCLE[(i + 1) % len(BORDER_CYCLE)]
+    changes = [f"{label}: {before[k]} -> {p[k]}" for k, label in (
+        ("phone_font", "phone text size (pt)"), ("phone_row", "phone row height (pt)"),
+        ("phone_min_width", "phone minimum column width"), ("phone_border", "phone separator colour"))
+        if p[k] != before[k]]
+    return p, changes
+
+
+def mobile_report(xlsx_bytes):
+    """Checks on a built file for phones: text size, row height, boxes, gridlines, protection."""
+    from openpyxl import load_workbook
+    wb = load_workbook(io.BytesIO(xlsx_bytes))
+    rows = []
+    data_sheets = [n for n in wb.sheetnames if n not in (START, SET, DASH)]
+    for name in data_sheets:
+        ws = wb[name]
+        rows.append((f"{name}: gridlines hidden", "PASS" if ws.sheet_view.showGridLines is False else "FIX",
+                     str(ws.sheet_view.showGridLines)))
+        rows.append((f"{name}: protected", "PASS" if ws.protection.sheet else "FIX", str(ws.protection.sheet)))
+        inp = ws.cell(row=FIRST, column=1)
+        rows.append((f"{name}: input text size", "PASS" if (inp.font.sz or 0) >= 13 else "FIX",
+                     f"{inp.font.sz} pt"))
+        rows.append((f"{name}: row height", "PASS" if (ws.row_dimensions[FIRST].height or 0) >= 28 else "FIX",
+                     f"{ws.row_dimensions[FIRST].height} pt"))
+        boxed, unlocked = 0, 0
+        for r in range(FIRST, LAST + 1):
+            for ci in range(1, ws.max_column + 1):
+                c = ws.cell(row=r, column=ci)
+                b = c.border
+                if b and b.left and b.right and b.top and b.bottom and b.left.style and b.right.style:
+                    boxed += 1
+                if isinstance(c.value, str) and c.value.startswith("=") and c.protection.locked is False:
+                    unlocked += 1
+        rows.append((f"{name}: boxed cells", "PASS" if boxed == 0 else "WARNING", str(boxed)))
+        rows.append((f"{name}: formulas locked", "PASS" if unlocked == 0 else "FIX", f"{unlocked} unlocked"))
+    return rows

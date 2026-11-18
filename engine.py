@@ -69,10 +69,14 @@ def ready_entries(slots):
     return out
 
 
-def ordered_for(job, entries):
-    """Slots with this duty first (slot order), then the other ready slots as backups."""
+def ordered_for(job, entries, rotate=0):
+    """Slots with this duty first, then the other ready slots as backups.
+    rotate starts the duty list at a different slot, so repeated calls spread over the free keys."""
     primary = [e for e in entries if job in e.get("duties", [])]
     rest = [e for e in entries if job not in e.get("duties", [])]
+    if primary and rotate:
+        k = rotate % len(primary)
+        primary = primary[k:] + primary[:k]
     return primary + rest
 
 
@@ -132,9 +136,9 @@ def record(log, job, slot, ok, ms, note, keys):
     del log[:-500]
 
 
-def run_job(job, system, user, slots, log, keys, images=(), grounding=False, sources=None):
+def run_job(job, system, user, slots, log, keys, images=(), grounding=False, sources=None, rotate=0):
     """Ask the slots for this job in order. Returns (text, slot name)."""
-    entries = ordered_for(job, ready_entries(slots))
+    entries = ordered_for(job, ready_entries(slots), rotate)
     if not entries:
         raise EngineError("No AI slot is ready. Enter a key and a model name in the sidebar.")
     errs = []
@@ -163,13 +167,14 @@ def extract_json(text):
     return json.loads(t[a:b + 1])
 
 
-def json_job(job, system, user, slots, log, keys, check, images=(), attempts=2, grounding=False, sources=None):
+def json_job(job, system, user, slots, log, keys, check, images=(), attempts=2, grounding=False, sources=None,
+             rotate=0):
     """Ask for JSON and check it. check(data) returns a list of problems (empty means fine)."""
     problem = ""
     for _ in range(attempts):
         extra = (f"\n\nYOUR PREVIOUS REPLY WAS REJECTED: {problem}. "
                  "Reply again with ONLY valid JSON in the required shape.") if problem else ""
-        text, slot = run_job(job, system, user + extra, slots, log, keys, images, grounding, sources)
+        text, slot = run_job(job, system, user + extra, slots, log, keys, images, grounding, sources, rotate)
         try:
             problems = check(extract_json(text))
         except Exception as ex:
