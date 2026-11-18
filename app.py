@@ -187,8 +187,9 @@ tab_make, tab_results, tab_projects, tab_chat, tab_api, tab_log = st.tabs(
 
 # ================= TAB: make today's product
 with tab_make:
-    st.markdown("#### 1. Trade, market and brand")
-    trade_label = st.selectbox("Trade (choose from the list)", sheets.TRADE_LABELS, key="trade_sel")
+    st.markdown("#### 1. Product and customer")
+    prod_choice = st.selectbox("Product", [AUTO] + list(brains.PRODUCT_TITLES.values()), key="prod_sel")
+    trade_label = st.selectbox("Target customer (choose from the list)", sheets.TRADE_LABELS, key="trade_sel")
     trade_key = TRADE_KEY_BY_LABEL[trade_label]
     tr = sheets.TRADES[trade_key]
     st.markdown(
@@ -207,7 +208,6 @@ with tab_make:
                           secret("BRAND_NAME", sheets.BRAND_DEFAULT), key="brand").strip() or sheets.BRAND_DEFAULT
     st.caption("Before you publish, check the brand name in an official trademark search. "
                "Another business may already use this name in the same trade.")
-    prod_choice = st.selectbox("Product", [AUTO] + list(brains.PRODUCT_TITLES.values()), key="prod_sel")
     proj.update(trade=trade_key, market=market, currency=currency, business=brand, audience=trade_label)
     fixed_key = None if prod_choice == AUTO else TITLE_TO_KEY[prod_choice]
 
