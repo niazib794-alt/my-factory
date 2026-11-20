@@ -21,13 +21,15 @@ SLOT_DEFS = [
     {"id": "gem1", "label": "Gemini 1", "kind": "gemini", "base": "", "default": ["Research"]},
     {"id": "gem2", "label": "Gemini 2", "kind": "gemini", "base": "", "default": ["Guide"]},
     {"id": "gem3", "label": "Gemini 3", "kind": "gemini", "base": "", "default": ["Decide", "Critic"]},
-    {"id": "groq", "label": "Groq", "kind": "openai", "base": "https://api.groq.com/openai/v1",
-     "default": ["Listing", "Pins"]},
-    {"id": "mistral", "label": "Mistral", "kind": "openai", "base": "https://api.mistral.ai/v1",
-     "default": ["Guide"]},
-    {"id": "openrouter", "label": "OpenRouter", "kind": "openai", "base": "https://openrouter.ai/api/v1", "default": []},
+    {"id": "groq", "label": "Groq 1", "kind": "openai", "base": "https://api.groq.com/openai/v1", "default": ["Listing", "Pins"]},
+    {"id": "groq2", "label": "Groq 2", "kind": "openai", "base": "https://api.groq.com/openai/v1", "default": ["Research"]},
+    {"id": "mistral", "label": "Mistral 1", "kind": "openai", "base": "https://api.mistral.ai/v1", "default": ["Guide"]},
+    {"id": "mistral2", "label": "Mistral 2", "kind": "openai", "base": "https://api.mistral.ai/v1", "default": []},
+    {"id": "openrouter", "label": "OpenRouter 1", "kind": "openai", "base": "https://openrouter.ai/api/v1", "default": []},
+    {"id": "openrouter2", "label": "OpenRouter 2", "kind": "openai", "base": "https://openrouter.ai/api/v1", "default": []},
+    {"id": "cohere", "label": "Cohere", "kind": "openai", "base": "https://api.cohere.ai/compatibility/v1", "default": ["Research"]},
     {"id": "cus1", "label": "Custom AI 1", "kind": "openai", "base": "", "default": ["Chat", "Decide"]},
-    {"id": "cus2", "label": "Custom AI 2", "kind": "openai", "base": "", "default": ["Research"]},
+    {"id": "cus2", "label": "Custom AI 2", "kind": "openai", "base": "", "default": []},
     {"id": "cus3", "label": "Custom AI 3", "kind": "openai", "base": "", "default": []},
     {"id": "cus4", "label": "Custom AI 4", "kind": "openai", "base": "", "default": []},
     {"id": "cus5", "label": "Custom AI 5", "kind": "openai", "base": "", "default": []},
@@ -61,7 +63,7 @@ def ready_entries(slots):
     """Slots that have a key and a model (and a base URL when the kind needs one)."""
     out = []
     for s in slots:
-        if not s.get("key") or not s.get("model"):
+        if not s.get("on", True) or not s.get("key") or not s.get("model"):
             continue
         if s["kind"] == "openai" and not s.get("base"):
             continue
@@ -92,7 +94,7 @@ def _post(url, headers, body, timeout=120):
     raise EngineError("no reply after retries")
 
 
-def call_slot(entry, system, user, images=(), grounding=False, sources=None):
+def call_slot(entry, system, user, images=(), grounding=False, sources=None, timeout=120):
     """One call to one slot. Returns the text of the reply."""
     if entry["kind"] == "gemini":
         parts = [{"text": user}]
@@ -104,7 +106,7 @@ def call_slot(entry, system, user, images=(), grounding=False, sources=None):
         if grounding:
             body["tools"] = [{"google_search": {}}]
         data = _post(f"{GEMINI}/models/{entry['model']}:generateContent",
-                     {"Content-Type": "application/json", "x-goog-api-key": entry["key"]}, body)
+                     {"Content-Type": "application/json", "x-goog-api-key": entry["key"]}, body, timeout=timeout)
         try:
             text = "".join(p.get("text", "") for p in data["candidates"][0]["content"]["parts"])
         except (KeyError, IndexError, TypeError):
@@ -120,7 +122,7 @@ def call_slot(entry, system, user, images=(), grounding=False, sources=None):
         data = _post(entry["base"].rstrip("/") + "/chat/completions",
                      {"Authorization": f"Bearer {entry['key']}", "Content-Type": "application/json"},
                      {"model": entry["model"], "temperature": 0.3,
-                      "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]})
+                      "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}, timeout=timeout)
         try:
             text = data["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError):
@@ -185,10 +187,10 @@ def json_job(job, system, user, slots, log, keys, check, images=(), attempts=2, 
     raise EngineError(f"{job}: the reply was not valid after {attempts} tries: {problem}")
 
 
-def test_slot(entry, log, keys):
+def test_slot(entry, log, keys, timeout=40):
     t0 = time.time()
     try:
-        call_slot(entry, "Reply with the single word OK.", "Say OK.")
+        call_slot(entry, "Reply with the single word OK.", "Say OK.", timeout=timeout)
         record(log, "Test", entry["name"], True, (time.time() - t0) * 1000, "test ok", keys)
         return True, "works"
     except Exception as ex:
@@ -245,3 +247,25 @@ def score_table(log):
                     "avg ms": round(s["ms"] / s["ok"]) if s["ok"] else 0,
                     "last error": s["last"]})
     return sorted(out, key=lambda x: (-x["success %"], x["avg ms"]))
+
+
+# secret names read for each slot (the first filled name wins)
+SLOT_SECRETS = {
+    "gem1": ["GEMINI_KEY_1"], "gem2": ["GEMINI_KEY_2"], "gem3": ["GEMINI_KEY_3"],
+    "groq": ["GROQ_KEY", "GROQ_KEY_1"], "groq2": ["GROQ_KEY_2", "GROQ_2_KEY"],
+    "mistral": ["MISTRAL_KEY", "MISTRAL_KEY_1"], "mistral2": ["MISTRAL_KEY_2", "MISTRAL_2_KEY"],
+    "openrouter": ["OPENROUTER_KEY", "OPENROUTER_KEY_1"], "openrouter2": ["OPENROUTER_KEY_2", "OPENROUTER_2_KEY"],
+    "cohere": ["COHERE_KEY", "COHERE_API_KEY", "COHERE_KEY_1"],
+}
+SLOT_SECRETS.update({f"cus{n}": [f"CUSTOM{n}_KEY"] for n in range(1, 7)})
+SLOT_MODEL_SECRETS = {
+    "gem1": ["GEMINI_MODEL"], "gem2": ["GEMINI_MODEL"], "gem3": ["GEMINI_MODEL"],
+    "groq": ["GROQ_MODEL"], "groq2": ["GROQ_MODEL_2", "GROQ_MODEL"],
+    "mistral": ["MISTRAL_MODEL"], "mistral2": ["MISTRAL_MODEL_2"],
+    "openrouter": ["OPENROUTER_MODEL"], "openrouter2": ["OPENROUTER_MODEL_2"],
+    "cohere": ["COHERE_MODEL"],
+}
+SLOT_MODEL_SECRETS.update({f"cus{n}": [f"CUSTOM{n}_MODEL"] for n in range(1, 7)})
+SLOT_BASE_SECRETS = {"cohere": ["COHERE_BASE"], "mistral": ["MISTRAL_BASE"]}
+SLOT_BASE_SECRETS.update({f"cus{n}": [f"CUSTOM{n}_BASE"] for n in range(1, 7)})
+MODEL_DEFAULT.update({"groq2": "llama-3.3-70b-versatile", "cohere": "command-r-plus-08-2024"})

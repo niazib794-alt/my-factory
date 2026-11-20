@@ -72,46 +72,132 @@ def google_test_zip(zip_bytes):
     return buf.getvalue()
 
 
+def models_ready(slots, tav_keys):
+    """The product part opens only when every key that is on has passed the test this session."""
+    status = ss.get("key_status", {})
+    ready = engine.ready_entries(slots)
+    if not ready:
+        return False, "No AI key is on and filled. Turn on at least one key in the sidebar."
+    bad = []
+    for e_ in ready:
+        ok_ = status.get(e_["name"], (None, ""))[0]
+        if ok_ is not True:
+            bad.append(e_["name"] + (" (not tested)" if ok_ is None else " (failed)"))
+    for i in range(1, len(tav_keys) + 1):
+        ok_ = status.get(f"Tavily {i}", (None, ""))[0]
+        if ok_ is not True:
+            bad.append(f"Tavily {i}" + (" (not tested)" if ok_ is None else " (failed)"))
+    if bad:
+        return False, ("Test the models first. Not ready: " + ", ".join(bad)
+                       + ". Press 'Test all keys now' in the sidebar, or switch off a key that does not work.")
+    return True, f"All {len(ready)} AI keys and {len(tav_keys)} Tavily key(s) passed the test."
+
+
 def chip(text, colour):
     return f"<span class='bf-chip' style='background:#{colour}'>{text}</span>"
 
 
 # ---------------- sidebar: API keys and duties (left side)
+def secret_any(names, default=""):
+    """The first secret that is filled wins."""
+    for n in names:
+        v = secret(n)
+        if v:
+            return v
+    return default
+
+
 with st.sidebar:
     st.header("🔑 API keys and duties")
-    st.caption("Keys stay in this browser session. For a private app, put them in Streamlit secrets. "
-               "Each slot does the jobs ticked under 'Used for'. Other ready slots are backups.")
+    st.caption("Keys are read from Streamlit secrets first. Each box shows the secret name it reads. "
+               "Keys stay in this browser session.")
     slots = []
     for d in engine.SLOT_DEFS:
         sid = d["id"]
+        kn = engine.SLOT_SECRETS.get(sid, [])
+        mn = engine.SLOT_MODEL_SECRETS.get(sid, [])
+        bn = engine.SLOT_BASE_SECRETS.get(sid, [])
         with st.expander(d["label"], expanded=False):
+            st.caption("Secret: " + (" or ".join(kn) if kn else "none"))
+            key = st.text_input("API key", secret_any(kn), type="password", key=f"key_{sid}").strip()
             if d["kind"] == "gemini":
-                key = st.text_input("API key", secret(f"GEMINI_KEY_{sid[-1]}"), type="password",
-                                    key=f"key_{sid}").strip()
-                model = st.text_input("Model", secret("GEMINI_MODEL", "gemini-2.5-flash"),
-                                      key=f"model_{sid}").strip()
+                model = st.text_input("Model", secret_any(mn, "gemini-2.5-flash"), key=f"model_{sid}").strip()
                 base, name = "", d["label"]
             else:
-                pre = engine.SECRET_PREFIX.get(sid, "")
-                key = st.text_input("API key", secret(f"{pre}_KEY"), type="password", key=f"key_{sid}").strip()
                 if sid.startswith("cus"):
-                    name = st.text_input("Name (for example: Perplexity)", secret(f"{pre}_NAME", d["label"]),
+                    name = st.text_input("Name (for example: Perplexity)",
+                                         secret_any([f"CUSTOM{sid[-1]}_NAME"], d["label"]),
                                          key=f"name_{sid}").strip() or d["label"]
                 else:
                     name = d["label"]
-                base = st.text_input("Base URL (OpenAI style)", secret(f"{pre}_BASE", d["base"]),
+                base = st.text_input("Base URL (OpenAI style)", secret_any(bn, d["base"]),
                                      key=f"base_{sid}").strip()
-                model = st.text_input("Model", secret(f"{pre}_MODEL", engine.MODEL_DEFAULT.get(sid, "")),
+                model = st.text_input("Model", secret_any(mn, engine.MODEL_DEFAULT.get(sid, "")),
                                       key=f"model_{sid}").strip()
+            on = st.checkbox("Use this key", value=True, key=f"on_{sid}",
+                             help="Turn it off if it fails and you do not want it in the run.")
             duties = st.multiselect("Used for", engine.DUTIES, default=d["default"], key=f"duty_{sid}")
         slots.append({"id": sid, "name": name, "kind": d["kind"], "key": key, "model": model,
-                      "base": base, "duties": duties})
-    tav_key = st.text_input("Tavily key (web search, optional)", secret("TAVILY_KEY"), type="password",
-                            key="tav_key").strip()
+                      "base": base, "duties": duties, "on": on})
+    tav_1 = st.text_input("Tavily key 1 (web search)", secret_any(["TAVILY_KEY", "TAVILY_KEY_1"]),
+                          type="password", key="tav_key").strip()
+    tav_2 = st.text_input("Tavily key 2 (web search, optional)", secret_any(["TAVILY_KEY_2"]),
+                          type="password", key="tav_key2").strip()
+    tav_keys = [k for k in (tav_1, tav_2) if k]
+    tav_key = tav_keys[0] if tav_keys else ""
+    keys_all = [s["key"] for s in slots if s["key"]] + tav_keys
 
-keys_all = [s["key"] for s in slots if s["key"]] + ([tav_key] if tav_key else [])
+    st.divider()
+    st.subheader("✅ Test all keys")
+    st.caption("Tests every ready key and Tavily. Green means it answered; red shows the reason.")
+    if st.button("Test all keys now", type="primary", key="sb_test_all"):
+        ss["key_status"] = {}
+        ready_now = engine.ready_entries(slots)
+        if ready_now:
+            bar = st.progress(0.0, text="Testing...")
+            for i, e_ in enumerate(ready_now, 1):
+                ok_, msg_ = engine.test_slot(e_, ss["log"], keys_all, timeout=40)
+                ss["key_status"][e_["name"]] = (ok_, msg_)
+                bar.progress(i / len(ready_now), text=f"Tested {i} of {len(ready_now)}")
+        for i, tk in enumerate(tav_keys, 1):
+            try:
+                engine.tavily(tk, "contractor job costing spreadsheet")
+                engine.record(ss["log"], "Test", f"Tavily {i}", True, 0, "test ok", keys_all)
+                ss["key_status"][f"Tavily {i}"] = (True, "web search answered")
+            except Exception as ex_:
+                msg_ = engine.scrub(ex_, keys_all)
+                engine.record(ss["log"], "Test", f"Tavily {i}", False, 0, msg_, keys_all)
+                ss["key_status"][f"Tavily {i}"] = (False, msg_)
+    status_map = ss.get("key_status", {})
+    for s in slots:
+        if not s.get("on", True):
+            st.caption(f"⛔ {s['name']}: off")
+            continue
+        ready_flag = bool(s["key"] and s["model"] and (s["kind"] == "gemini" or s["base"]))
+        if s["name"] in status_map:
+            ok_, msg_ = status_map[s["name"]]
+            if ok_:
+                st.success(f"🟢 {s['name']}: connected")
+            else:
+                st.error(f"🔴 {s['name']}: {msg_[:110]}")
+        elif ready_flag:
+            st.info(f"🟡 {s['name']}: not tested yet")
+        else:
+            st.caption(f"⚪ {s['name']}: not set")
+    for i, tk in enumerate(tav_keys, 1):
+        label = f"Tavily {i}"
+        if label in status_map:
+            ok_, msg_ = status_map[label]
+            (st.success(f"🟢 {label}: connected") if ok_ else st.error(f"🔴 {label}: {msg_[:110]}"))
+        else:
+            st.info(f"🟡 {label}: not tested yet")
+    if not tav_keys:
+        st.caption("⚪ Tavily: not set")
+keys_all = [s["key"] for s in slots if s["key"]] + tav_keys
 
 # ---------------- project in memory
+if "key_status" not in ss:
+    ss["key_status"] = {}
 if "proj" not in ss:
     ss["proj"] = store.new_project("My first project", "Plumbers & Electricians", "USD",
                                    secret("BRAND_NAME", sheets.BRAND_DEFAULT), ["United States"])
@@ -237,10 +323,18 @@ with tab_make:
     notes = st.text_input("Notes for this run (optional)", key="notes")
     pins_on = st.checkbox("Make Pinterest pins and the image brief too", value=True, key="pins_on")
 
+    gate_ok, gate_msg = models_ready(slots, tav_keys)
+    if gate_ok:
+        st.success(gate_msg)
+    else:
+        st.warning(gate_msg)
     b1, b2 = st.columns(2)
     run_clicked = b1.button("Make today's product", type="primary", key="btn_run")
     resume_clicked = b2.button("Continue from where it stopped", key="btn_resume")
 
+    if run_clicked and not gate_ok:
+        st.error(gate_msg)
+        run_clicked = False
     if run_clicked:
         if today_count >= store.DAILY_LIMIT:
             st.warning(f"Today's limit of {store.DAILY_LIMIT} products is reached. Approve tomorrow's products tomorrow.")
@@ -274,7 +368,7 @@ with tab_make:
                 "brand": brand, "business": brand, "currency": currency, "market": market,
                 "audience": trade_label, "research_text": inp.get("pasted", ""), "source": inp.get("source", ""),
                 "research_passes": inp.get("passes", passes), "use_web": inp.get("use_web", False),
-                "tavily_key": tav_key, "shot_note": f"{len(imgs)} attached (layout only)" if imgs else "none",
+                "tavily_key": tav_key, "tavily_keys": tav_keys, "shot_note": f"{len(imgs)} attached (layout only)" if imgs else "none",
                 "images": imgs, "complaints": complaints, "prev": prev,
                 "prev_theme": None, "prev_style": store.last_style(proj),
                 "recent": store.last_versions(proj), "results_text": store.results_summary(proj),

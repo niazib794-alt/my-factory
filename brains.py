@@ -147,12 +147,16 @@ def brain1(ctx):
     for i in range(n):
         angle, desc, qword = ANGLES[i]
         web_text, web_items = "", []
-        if ctx.get("use_web") and ctx.get("tavily_key"):
-            try:
-                web_text = engine.tavily(ctx["tavily_key"],
-                                         f"{ctx['trade_label']} {qword} spreadsheet {ctx['market']}", web_items)
-            except Exception as e:
-                ctx.setdefault("notes", []).append(f"web pass {i + 1} failed: {engine.scrub(e, ctx['keys'])}")
+        if ctx.get("use_web") and (ctx.get("tavily_keys") or ctx.get("tavily_key")):
+            tkeys = ctx.get("tavily_keys") or [ctx["tavily_key"]]
+            query = f"{ctx['trade_label']} {qword} spreadsheet {ctx['market']}"
+            for tk in tkeys:
+                try:
+                    web_items = []
+                    web_text = engine.tavily(tk, query, web_items)
+                    break
+                except Exception as e:
+                    ctx.setdefault("notes", []).append(f"web pass {i + 1}, one Tavily key failed: {engine.scrub(e, ctx['keys'])}")
         user = (f"PASS {i + 1} of {n}, ANGLE: {angle}. {desc}\nTRADE: {ctx['trade_label']}\n"
                 f"MARKET: {ctx['market']}\nAUDIENCE: {ctx['audience']}\n"
                 f"SOURCE OF PASTED RESEARCH: {ctx['source'] or 'owner'}\n\n"

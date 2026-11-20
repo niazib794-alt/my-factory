@@ -16,7 +16,7 @@ PROJECTS = os.path.join(DATA, "projects")
 BACKUPS = os.path.join(DATA, "backups")
 DAILY = os.path.join(DATA, "daily_log.json")
 SCHEMA = 5
-DAILY_LIMIT = 5      # up to five approved products a day; each one still needs the owner's approval
+DAILY_LIMIT = 3      # up to three approved products a day; each one still needs the owner's approval
 MIN_VIEWS = 100      # no judgement below this many views
 
 
