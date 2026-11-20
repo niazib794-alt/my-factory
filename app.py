@@ -161,50 +161,82 @@ with st.sidebar:
 
     st.divider()
     st.subheader("✅ Test all keys")
-    st.caption("Tests every key that is on, and Tavily. Green means it answered; red shows the reason.")
-    if st.button("Test all keys now", type="primary", key="sb_test_all"):
+    ready_now = engine.ready_entries(slots)
+    st.caption(f"AI keys ready: {len(ready_now)}. Tavily keys: {len(tav_keys)}. "
+               f"Total to test: {len(ready_now) + len(tav_keys)}. Each key ticks green or red as soon as its test ends.")
+    clicked = st.button("Test all keys now", type="primary", key="sb_test_all")
+    status_map = ss.get("key_status", {})
+    if clicked:
         ss["key_status"] = {}
-        ready_now = engine.ready_entries(slots)
-        if ready_now:
-            bar = st.progress(0.0, text="Testing...")
-            for i, e_ in enumerate(ready_now, 1):
-                ok_, msg_ = engine.test_slot(e_, ss["log"], keys_all, timeout=40)
-                ss["key_status"][e_["name"]] = (ok_, msg_)
-                bar.progress(i / len(ready_now), text=f"Tested {i} of {len(ready_now)}")
+        status_map = ss["key_status"]
+        total_tests = len(ready_now) + len(tav_keys)
+        bar = st.progress(0.0, text="Testing...") if total_tests else None
+        done_tests = 0
+        for s in slots:
+            ph = st.empty()
+            if not s.get("on", True):
+                ph.caption(f"⛔ {s['name']}: off")
+                continue
+            if not (s["key"] and s["model"] and (s["kind"] == "gemini" or s["base"])):
+                ph.caption(f"⚪ {s['name']}: not set")
+                continue
+            ph.info(f"🟡 {s['name']}: testing...")
+            ok_, msg_ = engine.test_slot(s, ss["log"], keys_all, timeout=(90 if s["kind"] == "gemini" else 40))
+            status_map[s["name"]] = (ok_, msg_)
+            if ok_:
+                ph.success(f"🟢 {s['name']}: connected")
+            else:
+                ph.error(f"🔴 {s['name']}: {msg_[:110]}")
+            done_tests += 1
+            if bar is not None:
+                bar.progress(done_tests / total_tests, text=f"Tested {done_tests} of {total_tests}")
         for i, tk in enumerate(tav_keys, 1):
+            ph = st.empty()
+            label = f"Tavily {i}"
+            ph.info(f"🟡 {label}: testing...")
             try:
                 engine.tavily(tk, "contractor job costing spreadsheet")
-                engine.record(ss["log"], "Test", f"Tavily {i}", True, 0, "test ok", keys_all)
-                ss["key_status"][f"Tavily {i}"] = (True, "web search answered")
+                engine.record(ss["log"], "Test", label, True, 0, "test ok", keys_all)
+                status_map[label] = (True, "web search answered")
+                ph.success(f"🟢 {label}: connected")
             except Exception as ex_:
                 msg_ = engine.scrub(ex_, keys_all)
-                engine.record(ss["log"], "Test", f"Tavily {i}", False, 0, msg_, keys_all)
-                ss["key_status"][f"Tavily {i}"] = (False, msg_)
-    status_map = ss.get("key_status", {})
-    for s in slots:
-        if not s.get("on", True):
-            st.caption(f"⛔ {s['name']}: off")
-            continue
-        ready_flag = bool(s["key"] and s["model"] and (s["kind"] == "gemini" or s["base"]))
-        if s["name"] in status_map:
-            ok_, msg_ = status_map[s["name"]]
-            if ok_:
-                st.success(f"🟢 {s['name']}: connected")
+                engine.record(ss["log"], "Test", label, False, 0, msg_, keys_all)
+                status_map[label] = (False, msg_)
+                ph.error(f"🔴 {label}: {msg_[:110]}")
+            done_tests += 1
+            if bar is not None:
+                bar.progress(done_tests / total_tests, text=f"Tested {done_tests} of {total_tests}")
+        if bar is not None:
+            bar.progress(1.0, text=f"Tested {total_tests} of {total_tests}")
+    else:
+        for s in slots:
+            if not s.get("on", True):
+                st.caption(f"⛔ {s['name']}: off")
+                continue
+            ready_flag = bool(s["key"] and s["model"] and (s["kind"] == "gemini" or s["base"]))
+            if s["name"] in status_map:
+                ok_, msg_ = status_map[s["name"]]
+                if ok_:
+                    st.success(f"🟢 {s['name']}: connected")
+                else:
+                    st.error(f"🔴 {s['name']}: {msg_[:110]}")
+            elif ready_flag:
+                st.info(f"🟡 {s['name']}: not tested yet")
             else:
-                st.error(f"🔴 {s['name']}: {msg_[:110]}")
-        elif ready_flag:
-            st.info(f"🟡 {s['name']}: not tested yet")
-        else:
-            st.caption(f"⚪ {s['name']}: not set")
-    for i, tk in enumerate(tav_keys, 1):
-        label = f"Tavily {i}"
-        if label in status_map:
-            ok_, msg_ = status_map[label]
-            (st.success(f"🟢 {label}: connected") if ok_ else st.error(f"🔴 {label}: {msg_[:110]}"))
-        else:
-            st.info(f"🟡 {label}: not tested yet")
-    if not tav_keys:
-        st.caption("⚪ Tavily: not set")
+                st.caption(f"⚪ {s['name']}: not set")
+        for i, tk in enumerate(tav_keys, 1):
+            label = f"Tavily {i}"
+            if label in status_map:
+                ok_, msg_ = status_map[label]
+                if ok_:
+                    st.success(f"🟢 {label}: connected")
+                else:
+                    st.error(f"🔴 {label}: {msg_[:110]}")
+            else:
+                st.info(f"🟡 {label}: not tested yet")
+        if not tav_keys:
+            st.caption("⚪ Tavily: not set")
 keys_all = [s["key"] for s in slots if s["key"]] + tav_keys
 
 # ---------------- project in memory

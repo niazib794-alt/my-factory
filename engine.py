@@ -38,7 +38,7 @@ SLOT_DEFS = [
 SECRET_PREFIX = {"groq": "GROQ", "mistral": "MISTRAL", "openrouter": "OPENROUTER",
                  "cus1": "CUSTOM1", "cus2": "CUSTOM2", "cus3": "CUSTOM3",
                  "cus4": "CUSTOM4", "cus5": "CUSTOM5", "cus6": "CUSTOM6"}
-MODEL_DEFAULT = {"groq": "llama-3.3-70b-versatile", "mistral": "mistral-large-latest",
+MODEL_DEFAULT = {"groq": "llama-3.3-70b-versatile", "mistral": "mistral-small-latest",
                  "openrouter": "deepseek/deepseek-chat"}
 
 
