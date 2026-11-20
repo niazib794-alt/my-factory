@@ -99,7 +99,6 @@ def chip(text, colour):
 
 # ---------------- sidebar: API keys and duties (left side)
 def secret_any(names, default=""):
-    """The first secret that is filled wins."""
     for n in names:
         v = secret(n)
         if v:
@@ -107,19 +106,32 @@ def secret_any(names, default=""):
     return default
 
 
+def all_secret_values():
+    vals = {}
+    try:
+        for k in st.secrets.keys():
+            vals[k] = st.secrets[k]
+    except Exception:
+        pass
+    return vals
+
+
+SECRET_VALUES = all_secret_values()
+AUTO_KEYS, AUTO_TAV = engine.assign_keys(SECRET_VALUES)
+
+
 with st.sidebar:
     st.header("🔑 API keys and duties")
-    st.caption("Keys are read from Streamlit secrets first. Each box shows the secret name it reads. "
-               "Keys stay in this browser session.")
+    st.caption(f"Secrets found: {len(SECRET_VALUES)} names. Keys matched to slots: {len(AUTO_KEYS)}. "
+               f"Tavily: {len(AUTO_TAV)}. The name of a secret does not matter; the service word in it does.")
     slots = []
     for d in engine.SLOT_DEFS:
         sid = d["id"]
-        kn = engine.SLOT_SECRETS.get(sid, [])
         mn = engine.SLOT_MODEL_SECRETS.get(sid, [])
         bn = engine.SLOT_BASE_SECRETS.get(sid, [])
         with st.expander(d["label"], expanded=False):
-            st.caption("Secret: " + (" or ".join(kn) if kn else "none"))
-            key = st.text_input("API key", secret_any(kn), type="password", key=f"key_{sid}").strip()
+            st.caption("Key: found in secrets" if AUTO_KEYS.get(sid) else "Key: not found in secrets")
+            key = st.text_input("API key", AUTO_KEYS.get(sid, ""), type="password", key=f"key_{sid}").strip()
             if d["kind"] == "gemini":
                 model = st.text_input("Model", secret_any(mn, "gemini-2.5-flash"), key=f"model_{sid}").strip()
                 base, name = "", d["label"]
@@ -139,9 +151,9 @@ with st.sidebar:
             duties = st.multiselect("Used for", engine.DUTIES, default=d["default"], key=f"duty_{sid}")
         slots.append({"id": sid, "name": name, "kind": d["kind"], "key": key, "model": model,
                       "base": base, "duties": duties, "on": on})
-    tav_1 = st.text_input("Tavily key 1 (web search)", secret_any(["TAVILY_KEY", "TAVILY_KEY_1"]),
+    tav_1 = st.text_input("Tavily key 1 (web search)", AUTO_TAV[0] if len(AUTO_TAV) > 0 else "",
                           type="password", key="tav_key").strip()
-    tav_2 = st.text_input("Tavily key 2 (web search, optional)", secret_any(["TAVILY_KEY_2"]),
+    tav_2 = st.text_input("Tavily key 2 (web search, optional)", AUTO_TAV[1] if len(AUTO_TAV) > 1 else "",
                           type="password", key="tav_key2").strip()
     tav_keys = [k for k in (tav_1, tav_2) if k]
     tav_key = tav_keys[0] if tav_keys else ""
@@ -149,7 +161,7 @@ with st.sidebar:
 
     st.divider()
     st.subheader("✅ Test all keys")
-    st.caption("Tests every ready key and Tavily. Green means it answered; red shows the reason.")
+    st.caption("Tests every key that is on, and Tavily. Green means it answered; red shows the reason.")
     if st.button("Test all keys now", type="primary", key="sb_test_all"):
         ss["key_status"] = {}
         ready_now = engine.ready_entries(slots)

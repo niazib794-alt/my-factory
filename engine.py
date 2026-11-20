@@ -269,3 +269,47 @@ SLOT_MODEL_SECRETS.update({f"cus{n}": [f"CUSTOM{n}_MODEL"] for n in range(1, 7)}
 SLOT_BASE_SECRETS = {"cohere": ["COHERE_BASE"], "mistral": ["MISTRAL_BASE"]}
 SLOT_BASE_SECRETS.update({f"cus{n}": [f"CUSTOM{n}_BASE"] for n in range(1, 7)})
 MODEL_DEFAULT.update({"groq2": "llama-3.3-70b-versatile", "cohere": "command-r-plus-08-2024"})
+
+
+# ---------------- key discovery from the secret names (version 6.2)
+def pool_secrets(values, token):
+    """Every filled secret value whose name contains the service word and KEY, in name order.
+    MODEL, BASE and NAME secrets are skipped."""
+    out = []
+    for name in sorted(values):
+        up = str(name).upper()
+        if token in up and "KEY" in up and not any(x in up for x in ("MODEL", "BASE", "NAME")):
+            v = str(values[name] or "").strip()
+            if v:
+                out.append(v)
+    return out
+
+
+def assign_keys(values):
+    """Map the keys found in the secrets to the slots. A custom slot whose name is a provider name
+    (for example CUSTOM1_NAME = Mistral) is used when no key with the provider word exists.
+    Returns (slot id -> key, list of Tavily keys)."""
+    out = {}
+    for i, k in enumerate(pool_secrets(values, "GEMINI")[:3], 1):
+        out[f"gem{i}"] = k
+    customs = {n: str(values.get(f"CUSTOM{n}_NAME", "")).lower() for n in range(1, 7)}
+    custom_keys = {n: str(values.get(f"CUSTOM{n}_KEY", "")).strip() for n in range(1, 7)}
+    for sid, token, word in (("groq", "GROQ", "groq"), ("mistral", "MISTRAL", "mistral"),
+                             ("openrouter", "OPENROUTER", "openrouter")):
+        keys = pool_secrets(values, token)
+        if not keys:
+            keys = [custom_keys[n] for n in range(1, 7) if word in customs[n] and custom_keys[n]]
+        if keys:
+            out[sid] = keys[0]
+        if len(keys) > 1:
+            out[sid + "2"] = keys[1]
+    cohere = pool_secrets(values, "COHERE")
+    if not cohere:
+        cohere = [custom_keys[n] for n in range(1, 7) if "cohere" in customs[n] and custom_keys[n]]
+    if cohere:
+        out["cohere"] = cohere[0]
+    taken = set(out.values())
+    for n in range(1, 7):
+        if custom_keys[n] and custom_keys[n] not in taken:
+            out[f"cus{n}"] = custom_keys[n]
+    return out, pool_secrets(values, "TAVILY")[:2]
