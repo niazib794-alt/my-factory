@@ -292,7 +292,7 @@ def brain4(ctx):
 
 # ---------------- brain 5: sheet text (checked against the real columns)
 ROLE5 = """TASK: write the text that goes into the workbook: start lines for the START HERE tab, and one hint for each data tab.
-Name only columns and tabs that exist in the list you are given. Keep the layout refinement visible in one line if one is given.
+Name only columns and tabs that exist in the list you are given. Never mention file styles, font sizes, row heights, pt, refinements or internal notes; the buyer only needs to know how to use the sheet. Keep the layout refinement visible in one line if one is given.
 Shape: {"start_lines": ["3 to 10 short English lines"], "hints": {"Tab name": "one short English line"}} with one hint for every tab listed."""
 
 
@@ -306,6 +306,8 @@ def check_text(d, tabs):
     missing = [t for t in tabs if not str(hints.get(t, "")).strip()]
     if missing:
         probs.append(f"missing hint for {missing[0]}")
+    if any(sheets.INTERNAL_NOTE.search(str(s)) for s in _texts(d)):
+        probs.append("remove internal notes (font, row height, refinement) from START HERE")
     if any(len(s) > 220 for s in _texts(d)):
         probs.append("a line is longer than 220 characters")
     if _claims(d):

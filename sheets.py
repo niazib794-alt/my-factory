@@ -6,12 +6,14 @@ Each table holds 300 rows. Dashboards read the same rows.
 No Streamlit code here, so this file can be tested on its own.
 """
 import io
+import re
 
 from openpyxl import Workbook
 from openpyxl.formatting.rule import CellIsRule, FormulaRule
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Protection, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
+from openpyxl.worksheet.properties import PageSetupProperties
 
 N_ROWS = 300
 FIRST = 4                      # first data row (Excel numbering)
@@ -259,7 +261,8 @@ def _data_sheet(wb, name, cur, layout="laptop"):
         h.border = _box()
         h.protection = Protection(locked=True)
         ws.column_dimensions[get_column_letter(ci)].width = (
-            max(STYLE["phone_min_width"], _width(spec[2], layout)) if layout == "phone" else _width(spec[2], layout))
+            max(STYLE["phone_min_width"], _width(spec[2], layout), _word_width(spec[0]))
+            if layout == "phone" else _width(spec[2], layout))
     ws.row_dimensions[3].height = 44
     if layout == "phone":
         for r in range(FIRST, LAST + 1):
@@ -279,8 +282,10 @@ def _data_sheet(wb, name, cur, layout="laptop"):
             ws.add_data_validation(dv)
             dv.add(f"{col}{FIRST}:{col}{LAST}")
         elif spec[1] == "pct":
-            dv = DataValidation(type="decimal", operator="greaterThanOrEqual", formula1="0", allow_blank=True)
-            dv.error = "Type a percent, for example 12%."
+            dv = DataValidation(type="decimal", operator="between", formula1="0", formula2="1", allow_blank=True)
+            dv.error = "Type a percent between 0% and 100%, for example 12%."
+            dv.errorTitle = "Percent out of range"
+            dv.showErrorMessage = True
             ws.add_data_validation(dv)
             dv.add(f"{col}{FIRST}:{col}{LAST}")
     for rng, rule in (_rules(name) if CONDITIONAL_ON else []):
@@ -291,9 +296,14 @@ def _data_sheet(wb, name, cur, layout="laptop"):
                 c = ws.cell(row=r, column=ci)
                 c.font = _font(bool(c.font.b), STYLE["phone_font"], "0F172A", bool(c.font.i))
         for ci in range(1, len(cols) + 1):
-            ws.cell(row=3, column=ci).font = _font(True, 12, "FFFFFF")
+            ws.cell(row=3, column=ci).font = _font(True, 11, "FFFFFF")
     ws.freeze_panes = f"{'B' if layout == 'phone' else 'C'}{FIRST}"
     ws.auto_filter.ref = f"A3:{last}{LAST}"
+    ws.print_title_rows = "3:3"
+    ws.page_setup.orientation = "landscape" if layout == "laptop" else "portrait"
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
     ws.protection.sheet = PROTECT_ON
     ws.protection.autoFilter = False
     ws.protection.formatColumns = False
@@ -456,8 +466,7 @@ def _start_sheet(ws, module, cur, business, layout="laptop"):
         ("text", "1. Open Settings. Check the yellow values: business name, overhead method, default "
                  "overhead % and target margin."),
         ("text", "2. Type one row per item in the yellow cells. Client / Job is required on every row."),
-        ("text", "3. Open Dashboard for totals and warnings (losses, overdue invoices, approved work "
-                 "with no amount)."),
+        ("text", dash_tip(module)),
         ("head", "Limits and protection"),
         ("text", f"Each table holds {N_ROWS} rows. Formula cells are locked without a password, so they "
                  "are hard to change by mistake. Google Sheets shows protection settings under the Data menu."),
@@ -494,6 +503,9 @@ def _start_sheet(ws, module, cur, business, layout="laptop"):
     ws.protection.sheet = PROTECT_ON
 
 
+INTERNAL_NOTE = re.compile(r"\d\s*pt\b|\bpt\b|font|row height|column width|refinement|file style|phone view uses", re.I)
+
+
 def build_workbook(module, currency="USD", business=None, layout="laptop", theme=None,
                    protect=True, validations=True, conditional=True, text=None,
                    trade="plumb_elec", style=None, brand=None):
@@ -523,6 +535,8 @@ def build_workbook(module, currency="USD", business=None, layout="laptop", theme
     PHONE_BORDER = Border(bottom=Side(style="thin", color=STYLE["phone_border"]))
     DASH_TAB = t["accent"] if contrast(t["accent"], "FFFFFF") >= 3 else t["primary"]
     OVERRIDE_TEXT = dict(text or {})
+    if "start_lines" in OVERRIDE_TEXT:
+        OVERRIDE_TEXT["start_lines"] = [l for l in OVERRIDE_TEXT["start_lines"] if not INTERNAL_NOTE.search(str(l))]
     wb = Workbook()
     wb.properties.creator = BRAND
     wb.properties.title = PRODUCT_NAMES[module]
@@ -635,6 +649,8 @@ def start_text_problems(lines, headers, dashboard_labels=()):
     probs = []
     for line in lines:
         low = str(line).lower()
+        if INTERNAL_NOTE.search(str(line)):
+            probs.append(f"internal note, not for the buyer: {str(line)[:70]}")
         for word in FORBIDDEN_CLAIMS:
             if word in low:
                 probs.append(f"'{word}' is not in the workbook: {str(line)[:70]}")
@@ -692,3 +708,23 @@ def mobile_report(xlsx_bytes):
         rows.append((f"{name}: boxed cells", "PASS" if boxed == 0 else "WARNING", str(boxed)))
         rows.append((f"{name}: formulas locked", "PASS" if unlocked == 0 else "FIX", f"{unlocked} unlocked"))
     return rows
+
+
+def _word_width(header):
+    """Column width that keeps the longest word of a header on one line (phone, 11 pt bold)."""
+    words = [w.strip("()%,./") for w in str(header).replace("/", " ").split()]
+    longest = max((len(w) for w in words), default=0)
+    return longest * 1.6 + 2
+
+
+DASH_TIPS = {
+    "job_costing": "losses and jobs below target margin",
+    "change_orders": "approved work with no amount typed, and approved work not billed yet",
+    "receivables": "overdue invoices and follow-ups due now or late",
+    "bundle": "losses, jobs below target margin, approved work with no amount, overdue invoices and follow-ups",
+}
+
+
+def dash_tip(module):
+    """The Dashboard line in START HERE names only the warnings this product really has."""
+    return f"3. Open Dashboard for totals and warnings ({DASH_TIPS[module]})."
