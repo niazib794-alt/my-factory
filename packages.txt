@@ -1,2 +1,3 @@
 libreoffice-calc
 poppler-utils
+fonts-inter
