@@ -499,8 +499,10 @@ with tab_make:
             if state["status"] == "waiting_approval":
                 if st.button("Approve and save this product", type="primary", key="btn_approve"):
                     version_no = len(proj["versions"]) + 1
-                    ctx_pkg = {"currency": currency, "business": brand, "brand": brand, "trade": state.get("trade", trade_key),
-                               "style": state.get("style", {})}
+                            ctx_pkg = {"currency": currency, "business": brand, "brand": brand, "trade": state.get("trade", trade_key),
+                   "style": state.get("style", {}),
+                   "trade_label": sheets.TRADES.get(state.get("trade", trade_key), {}).get("label") or state.get("trade", trade_key).replace("_", " ").title()}
+
                     zip_bytes, manifest = brains.build_package(ctx_pkg, state, version_no)
                     types = sorted({c["type"] for c in plan["changes"]})
                     proj["versions"].append({
