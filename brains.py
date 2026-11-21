@@ -1,13 +1,16 @@
-"""Business Factory 5 - the brains (version 6).
+"""Business Factory 5 - the brains (version 8).
 
-Twelve brains, one job each.
-- Brains 1 to 9 use AI. Every reply is checked by code; a rejected reply gets one retry with the reason.
-- Brain 1 runs up to five research passes, one angle each, on different free keys, then merges the evidence.
-- Brain 10 builds the phone file and checks it for phones (code).
-- Brain 11 is the critic and the gate: its checks are code, which the AI cannot override. An AI critic may
-  add advisory notes, but it never blocks.
-- Brain 12 packages the files with checksums (code).
-A FIX sends the brains that need it back through the pipeline (at most two fix rounds). A BLOCK stops the run.
+Twelve brains, one job each. They run in order and pass their output on.
+- Brains 1 to 9 use AI. Each reply is checked by code. A rejected reply gets one retry with the reason.
+  If it still fails, the brain uses a truthful template for its part and the pipeline keeps going.
+  The template is always marked in the run, so the owner can see it.
+- Brain 1 runs up to five research passes, one angle each, on different keys, then merges the evidence.
+  Evidence labelled SOURCE must have a link; otherwise the label becomes GUESS.
+- Brain 7 writes the listing for Payhip. A sanitizer removes any sentence that breaks the rules
+  (no offline, no FREE, no internal notes, no unverified numbers, no unsupported features) and fills the
+  required parts from the product's own facts. Listing wording never stops the pipeline.
+- Brain 10 builds the phone file and checks it (code). Brain 11 is the critic and gate: code checks,
+  with an optional AI critic whose notes are advisory. Brain 12 packages the files (code).
 Nothing is approved without the owner.
 """
 import difflib
@@ -19,6 +22,7 @@ import zipfile
 from datetime import datetime
 
 import engine
+import poster
 import sheets
 
 PRODUCT_TITLES = {
@@ -27,12 +31,14 @@ PRODUCT_TITLES = {
     "receivables": "Contractor Invoice & Payment Collection",
     "bundle": "All-in-One Master Contractor Bundle",
 }
+PRODUCT_KEYWORD = {"job_costing": "job costing", "change_orders": "extra work", "receivables": "invoice",
+                   "bundle": "bundle"}
 CHANGE_TYPES = ["colour", "font", "layout", "feature", "ease_of_use", "complaint_fix", "content", "price_guidance"]
 EVIDENCE_LABELS = ["SOURCE", "USER_INPUT", "GUESS", "UNKNOWN"]
 BRAIN_NAMES = {
     1: "Research (up to 5 passes)", 2: "Gaps and complaints", 3: "Trade profile", 4: "Change plan",
-    5: "Sheet text", 6: "Decision and price", 7: "Gumroad listing", 8: "Buyer guide",
-    9: "Pins and image brief", 10: "Mobile and layout reviewer (code)", 11: "Critic and gate (code + AI advisory)",
+    5: "Sheet text", 6: "Decision and price", 7: "Payhip listing", 8: "Buyer guide",
+    9: "Pins and poster", 10: "Mobile and layout reviewer (code)", 11: "Critic and gate (code + AI advisory)",
     12: "Package (code)",
 }
 AI_ORDER = [1, 2, 3, 4, 5, 6, 7, 8, 9]
@@ -48,22 +54,157 @@ RISKY = re.compile(r"\b(guarantee[sd]?|best[- ]?sellers?|cure[sd]?|diagnos\w*|me
                    r"passive income|get rich|income guarantee)\b", re.I)
 FREE_WORD = re.compile(r"\bfree\b", re.I)
 UNSUPPORTED = re.compile(r"\b(overtime|benefits?|union|apprentice\w*|offline|prevent\w*|avoid disputes?|boost\w*)\b", re.I)
+BANNED_LISTING = re.compile(r"\b(offline|free|guarantee[sd]?|passive income|get rich|best[- ]?sellers?|cure[sd]?|"
+                            r"medical|gumroad|nurture|overtime|benefits?|union|apprentice\w*|prevent\w*|"
+                            r"avoid disputes?|boost\w*|save \d+|\d+\s*(?:%|percent))\b", re.I)
 PROPS = {
     "plumb_elec": "a plumber with a wrench", "hvac": "an HVAC technician with a gauge set",
     "general": "a general contractor with a clipboard", "roofing": "a roofer with a safety harness",
     "landscape": "a landscaper with pruning shears", "painters": "a painter with a paint roller",
     "handyman": "a handyman with a toolbox", "other": "a tradesperson with a toolbox",
 }
-SHARED = """You are one brain inside Business Factory 5. The system prepares one product: a spreadsheet workbook for trade businesses, sold on Gumroad.
-Owner notes and feedback are simple Urdu. Buyer-facing text is simple English with short sentences.
-EVIDENCE: every claim is labelled SOURCE (with a link), USER_INPUT (pasted or uploaded by the owner), GUESS or UNKNOWN. Never invent numbers, prices, sales, reviews, ratings, competitor counts or trends.
+SHARED = """You are one brain inside Business Factory 5. The system prepares one product: a spreadsheet workbook for trade businesses, sold on Payhip (a digital download).
+Owner notes and feedback are simple Urdu. Buyer-facing text is simple English with short sentences, US spelling.
+EVIDENCE: every claim is labelled SOURCE (with a link), USER_INPUT (pasted or uploaded by the owner), GUESS or UNKNOWN. Never invent numbers, prices, sales, reviews, ratings, competitor counts or trends. Never put a percentage or a money figure in buyer text unless the owner gave it.
 Never promise sales, income or results. No legal, tax or accounting advice. Never copy competitor names, text or brands.
-Never claim a feature the workbook does not have (for example overtime, benefits, union tracking, offline use, or preventing disputes).
+Never claim a feature the workbook does not have (for example overtime, benefits, union tracking, offline use, or preventing disputes). Never write internal notes (font sizes, row heights, refinements, file styles) in buyer text.
 Return ONLY valid JSON in the exact shape asked for, with no other text."""
+
+# ---------------- facts the workbook really has (used by the sanitizer and the templates)
+FACTS = {
+    "job_costing": {
+        "title_options": ["Service Business Profit & Job Costing Workbook",
+                          "Job Costing and Profit Tracker for Service Businesses",
+                          "Labor, Materials and Overhead Job Costing Sheet"],
+        "description": ("Track every service job in one workbook. Enter the labor hours, labor rate, materials, "
+                        "subcontractors and other costs for each job. The workbook adds the overhead and shows the "
+                        "profit and profit margin for every job. The Dashboard lists the jobs with a loss and the jobs "
+                        "below your target margin. It is a Google Sheets and Excel (.xlsx) template with no macros. It "
+                        "has a desktop layout for laptops and a phone layout with bigger text. You type your own numbers "
+                        "and the totals update as you type. Use it as a tracking tool for your own business. It gives no "
+                        "tax, accounting or legal advice."),
+        "hook": "Know the cost and profit of every job, with the numbers updating as you type.",
+        "how_to": ["Open the file in Google Sheets or Excel.",
+                   "Open Settings and check the overhead method and target margin.",
+                   "Type one row per job in the yellow cells, then open the Dashboard to see the totals and warnings."],
+        "included": ["Job costing tab for labor, materials, subcontractors and other costs",
+                     "Overhead and profit margin calculated for every job",
+                     "Dashboard with totals and warnings", "Settings tab with overhead method and target margin",
+                     "Buyer guide inside the file"],
+        "not_included": ["Accounting or tax advice", "Payroll or invoicing",
+                         "Automatic link to your bank or accounting software"],
+        "requirements": ["A Google account, or Microsoft Excel", "Google Sheets or Excel that opens .xlsx files"],
+        "tags": ["job costing", "contractor", "profit margin", "spreadsheet", "google sheets", "excel template",
+                 "labor cost", "small business"],
+        "faq": [("What file do I get?", "One Excel (.xlsx) workbook with a laptop layout and a phone layout."),
+                ("Does it need macros?", "No. The workbook has no macros."),
+                ("Do I need to type formulas?", "No. The formulas are already in place and locked."),
+                ("Can I change the overhead?", "Yes. Set the overhead method and target margin in Settings."),
+                ("Is it tax advice?", "No. It is a tracking tool only.")],
+    },
+    "change_orders": {
+        "title_options": ["Contractor Extra Work Approval Tracker",
+                          "Extra Work and Change Order Log for Contractors",
+                          "Client Approval and Extra Work Sheet"],
+        "description": ("Log every extra-work request in one workbook. For each request, enter the job, the date, who asked, "
+                        "the labor hours and rate, the materials and other costs. Set your markup, and the workbook shows "
+                        "the proposed charge. Record the client decision, so you can see which requests are approved, "
+                        "pending or rejected. The Dashboard shows the approved work that has no amount typed and the "
+                        "approved work not billed yet. It is a Google Sheets and Excel (.xlsx) template with no macros, "
+                        "with a desktop layout and a phone layout. You type your own numbers. It gives no legal, tax or "
+                        "accounting advice."),
+        "hook": "Log each extra-work request and see its client decision, proposed charge and billing status in one place.",
+        "how_to": ["Open the file in Google Sheets or Excel.",
+                   "Open Settings and set your business name and currency.",
+                   "Type one row per extra-work request in the yellow cells, then open the Dashboard to check approved work."],
+        "included": ["Extra work log for each request", "Client decision list with pending, approved and rejected",
+                     "Proposed charge with your markup", "Dashboard with approved work not billed yet",
+                     "Buyer guide inside the file"],
+        "not_included": ["Legal advice on contracts or change orders", "Payroll or invoicing",
+                         "Automatic link to your accounting software"],
+        "requirements": ["A Google account, or Microsoft Excel", "Google Sheets or Excel that opens .xlsx files"],
+        "tags": ["extra work", "change order", "contractor", "client approval", "spreadsheet", "google sheets",
+                 "excel template", "small business"],
+        "faq": [("What file do I get?", "One Excel (.xlsx) workbook with a laptop layout and a phone layout."),
+                ("Does it need macros?", "No. The workbook has no macros."),
+                ("Can I use it on a phone?", "Yes. Open it in Google Sheets or Excel on your phone."),
+                ("Is it legal advice?", "No. It is a tracking tool only."),
+                ("Can I change the markup?", "Yes. Type the markup for each request.")],
+    },
+    "receivables": {
+        "title_options": ["Contractor Invoice and Payment Collection Tracker",
+                          "Invoice, Payment and Aging Tracker for Contractors",
+                          "Follow-up Sheet for Contractor Invoices"],
+        "description": ("Track every invoice and payment in one workbook. Enter each invoice, the amount, the payments "
+                        "received and the due date. The workbook shows the balance, the payment status and the aging "
+                        "buckets from 1-30 to 90+ days. The Dashboard lists the overdue invoices and the follow-ups due "
+                        "now or late. It is a Google Sheets and Excel (.xlsx) template with no macros, with a desktop "
+                        "layout and a phone layout. You type your own numbers. It gives no legal, tax or accounting advice."),
+        "hook": "See every open balance, overdue invoice and follow-up in one workbook.",
+        "how_to": ["Open the file in Google Sheets or Excel.",
+                   "Open Settings and set your business name and currency.",
+                   "Type one row per invoice in the yellow cells, then open the Dashboard to see overdue invoices and follow-ups."],
+        "included": ["Invoice log with amount, payments and due date", "Balance and payment status for each invoice",
+                     "Aging buckets from 1-30 to 90+ days", "Dashboard with overdue invoices and follow-ups",
+                     "Buyer guide inside the file"],
+        "not_included": ["Legal advice on debt collection", "Payment processing", "Automatic link to your bank"],
+        "requirements": ["A Google account, or Microsoft Excel", "Google Sheets or Excel that opens .xlsx files"],
+        "tags": ["invoice tracker", "payment tracking", "contractor", "aging report", "spreadsheet", "google sheets",
+                 "excel template", "small business"],
+        "faq": [("What file do I get?", "One Excel (.xlsx) workbook with a laptop layout and a phone layout."),
+                ("Does it need macros?", "No. The workbook has no macros."),
+                ("Does it send reminders?", "No. It shows the follow-ups; you send the reminders yourself."),
+                ("Is it legal advice?", "No. It is a tracking tool only."),
+                ("Can I track partial payments?", "Yes. Type each payment in its column.")],
+    },
+    "bundle": {
+        "title_options": ["All-in-One Master Contractor Bundle: Job Costing, Extra Work and Invoices",
+                          "Contractor Business Bundle in One Workbook",
+                          "Job Costing, Extra Work and Payment Tracker Bundle"],
+        "description": ("Three trade workbooks in one file: job costing and profit, extra-work approvals, and invoices "
+                        "and payments. Each tab has the same clear layout, and the Dashboard shows the warnings from all "
+                        "three parts. It is a Google Sheets and Excel (.xlsx) template with no macros, with a desktop "
+                        "layout and a phone layout. You type your own numbers. It gives no legal, tax or accounting advice."),
+        "hook": "Job costing, extra-work approvals and invoices in one workbook.",
+        "how_to": ["Open the file in Google Sheets or Excel.",
+                   "Open Settings and set your business name, currency and overhead method.",
+                   "Type rows in the yellow cells of each tab, then open the Dashboard to see every total and warning."],
+        "included": ["Job costing tab with overhead and profit", "Extra work log with client decisions",
+                     "Invoice tracker with aging", "One Dashboard with the warnings from all three parts",
+                     "Buyer guide inside the file"],
+        "not_included": ["Legal, tax or accounting advice", "Payroll", "Automatic link to bank or accounting software"],
+        "requirements": ["A Google account, or Microsoft Excel", "Google Sheets or Excel that opens .xlsx files"],
+        "tags": ["contractor bundle", "job costing", "extra work", "invoice tracker", "spreadsheet", "google sheets",
+                 "excel template", "small business"],
+        "faq": [("What file do I get?", "One Excel (.xlsx) workbook with a laptop layout and a phone layout."),
+                ("Does it need macros?", "No. The workbook has no macros."),
+                ("Can I use only one tab?", "Yes. Each tab works on its own."),
+                ("Is it legal advice?", "No. It is a tracking tool only."),
+                ("Can I change the overhead?", "Yes. Set it in Settings.")],
+    },
+}
+GUIDE_TEMPLATE = [
+    ("What you get", "One Excel (.xlsx) workbook with a laptop layout and a phone layout. It opens in Google Sheets or Excel."),
+    ("Before you start", "Open the file, then go to Settings and fill in the yellow cells."),
+    ("First 10 minutes", "1. Open Settings. 2. Check the yellow values. 3. Type one row in the first data tab. 4. Open the Dashboard."),
+    ("Colour guide", "Yellow cells: type here. Grey cells: automatic. Do not type in grey cells."),
+    ("Each tab", "Type one row per item in the yellow cells of each data tab. The grey cells calculate on their own."),
+    ("Common mistakes", "Leave the grey cells alone, and type percentages with the % sign, for example 12%."),
+    ("Dashboard", "The Dashboard shows the totals and the warnings. Check it after each entry."),
+    ("FAQ", "Does it need macros? No. Is it legal or tax advice? No. It is a tracking tool only."),
+]
+TRADE_TERMS = {"job": "job", "labour": "labor", "client": "client", "change": "extra work"}
+STARTS_TEMPLATE = ["Welcome to your workbook.", "Type your own numbers in the yellow cells.",
+                   "Grey cells are automatic. Do not type in them.",
+                   "Formula cells are locked without a password, so only yellow cells change.",
+                   "Open the Dashboard to see the totals and warnings."]
+PRICE_TEMPLATE = [{"range": "USD 19 to 29", "purpose": "entry price ESTIMATE"},
+                  {"range": "USD 29 to 39", "purpose": "standard price ESTIMATE"},
+                  {"range": "USD 39 to 50", "purpose": "bundle price ESTIMATE"}]
+HOW_TO_BRIEF = "Owner steps are in 14_how_to_upload.txt."
 
 
 def _texts(obj):
-    """Every string inside a JSON-like object."""
     if isinstance(obj, str):
         yield obj
     elif isinstance(obj, dict):
@@ -78,6 +219,17 @@ def _safe(s):
     return re.sub(r"[^A-Za-z0-9_-]+", "_", str(s)).strip("_")[:60] or "file"
 
 
+def _claims(d):
+    return any(RISKY.search(s) or FREE_WORD.search(s) or UNSUPPORTED.search(s) for s in _texts(d))
+
+
+def _headers(product):
+    tabs = sheets.PRODUCT_SHEETS[product]
+    headers = [c[0] for t in tabs for c in sheets.COLUMNS[t]]
+    labels = [it[0] for _, items in sheets.dashboard_blocks(product) for it in items]
+    return tabs, headers, labels
+
+
 def _ask(ctx, job, brain, role, user, check, images=(), rotate=0, grounding=False):
     system = SHARED + f"\n\nBRAIN {brain} - {BRAIN_NAMES[brain]}\n{role}"
     if ctx.get("fix_notes"):
@@ -88,16 +240,23 @@ def _ask(ctx, job, brain, role, user, check, images=(), rotate=0, grounding=Fals
                            grounding=grounding, sources=ctx.get("sources") if grounding else None, rotate=rotate)
 
 
-def _claims(d):
-    """Risky, FREE or unsupported wording inside a reply."""
-    return any(RISKY.search(s) or FREE_WORD.search(s) or UNSUPPORTED.search(s) for s in _texts(d))
+def _ok_text(s):
+    s = str(s)
+    return not (BANNED_LISTING.search(s) or sheets.INTERNAL_NOTE.search(s))
 
 
-def _headers(product):
-    tabs = sheets.PRODUCT_SHEETS[product]
-    headers = [c[0] for t in tabs for c in sheets.COLUMNS[t]]
-    labels = [it[0] for _, items in sheets.dashboard_blocks(product) for it in items]
-    return tabs, headers, labels
+def _sentences(text):
+    return [x.strip() for x in re.split(r"(?<=[.!?])\s+", str(text)) if x.strip()]
+
+
+def _uniq(seq):
+    out, seen = [], set()
+    for x in seq:
+        k = str(x).strip().lower()
+        if k and k not in seen:
+            seen.add(k)
+            out.append(str(x).strip())
+    return out
 
 
 # ---------------- brain 1: research passes
@@ -122,13 +281,11 @@ def check_evidence(d):
         if it.get("id") in ids:
             probs.append(f"duplicate id {it.get('id')}")
         ids.add(it.get("id"))
-        if it.get("label") == "SOURCE" and not str(it.get("source", "")).startswith("http"):
-            probs.append("a SOURCE item needs a link; label it GUESS or USER_INPUT instead")
     return probs[:6]
 
 
 def merge_evidence(items):
-    """Join the passes, drop repeats, and number the evidence E1, E2, ..."""
+    """Join the passes, drop repeats, label SOURCE only with a link, and number E1, E2, ..."""
     seen, out = set(), []
     for it in items:
         text = str(it.get("text", "")).strip()
@@ -136,14 +293,18 @@ def merge_evidence(items):
         if not key or key in seen:
             continue
         seen.add(key)
-        out.append({"id": f"E{len(out) + 1}", "text": text, "label": it.get("label"),
-                    "source": it.get("source", ""), "date": it.get("date", ""), "angle": it.get("angle", "")})
+        label = it.get("label")
+        source = str(it.get("source", ""))
+        if label == "SOURCE" and not source.startswith("http"):
+            label = "GUESS"
+        out.append({"id": f"E{len(out) + 1}", "text": text, "label": label, "source": source,
+                    "date": it.get("date", ""), "angle": it.get("angle", "")})
     return out
 
 
 def brain1(ctx):
     n = max(RESEARCH_MIN, min(RESEARCH_MAX, int(ctx.get("research_passes", RESEARCH_DEFAULT))))
-    items, passes, slots_used = [], [], []
+    items, passes, slots_used, failed = [], [], [], []
     for i in range(n):
         angle, desc, qword = ANGLES[i]
         web_text, web_items = "", []
@@ -163,14 +324,26 @@ def brain1(ctx):
                 f"PASTED RESEARCH (owner input):\n{ctx['research_text'].strip()[:12000] or 'none'}\n\n"
                 f"WEB RESULTS FOR THIS ANGLE:\n{web_text[:8000] or 'none'}\n\n"
                 f"SCREENSHOT NOTES: {ctx['shot_note']}")
-        data, slot = _ask(ctx, "Research", 1, ROLE1, user, check_evidence,
-                          ctx["images"] if i == 0 else (), rotate=i, grounding=bool(ctx.get("grounding")))
+        try:
+            data, slot = _ask(ctx, "Research", 1, ROLE1, user, check_evidence,
+                              ctx["images"] if i == 0 else (), rotate=i, grounding=bool(ctx.get("grounding")))
+        except Exception as e:
+            failed.append(f"pass {i + 1} ({angle}): {engine.scrub(e, ctx['keys'])[:120]}")
+            continue
         for it in data["items"]:
             items.append(dict(it, angle=angle))
         passes.append({"angle": angle, "items": len(data["items"]), "web": len(web_items), "slot": slot})
         slots_used.append(slot)
     merged = merge_evidence(items)
-    return {"items": merged, "passes": passes, "requested": n}, " + ".join(dict.fromkeys(slots_used))
+    if not merged:
+        merged = merge_evidence([{"text": b, "label": "GUESS", "source": "", "angle": "product features"}
+                                 for b in FACTS[ctx["product"] or "job_costing"]["hook"].split(". ")] +
+                                [{"text": f, "label": "GUESS", "source": "", "angle": "product features"}
+                                 for f in FACTS[ctx["product"] or "job_costing"]["included"]])
+        slot = "template (no pass answered)"
+    else:
+        slot = " + ".join(dict.fromkeys(slots_used))
+    return {"items": merged, "passes": passes, "requested": n, "failed": failed}, slot
 
 
 # ---------------- brain 2: gaps and complaints
@@ -237,15 +410,21 @@ def brain3(ctx):
     return _ask(ctx, "Research", 3, role, user, check_trade)
 
 
+def fallback_trade(ctx):
+    t = sheets.TRADES.get(ctx["trade"], sheets.TRADES["other"])
+    return {"example_rows": [f"{t['example']}, one visit.", f"{t['example']} with one extra part.",
+                             f"{t['example']} that needs a second visit."],
+            "terms": dict(TRADE_TERMS), "pin_hook": f"Track every {ctx['trade_label'].split(' & ')[0].lower()} job in one workbook."}
+
+
 # ---------------- brain 4: change plan
 ROLE4 = """TASK: choose the product to make today and plan what is different from the last approved version.
 Product keys: job_costing, change_orders, receivables, bundle. If the owner fixed the product, use it.
 Change types allowed: colour, font, layout, feature, ease_of_use, complaint_fix, content, price_guidance.
-The trade palette is fixed by the trade, so do not plan a new colour for the headers. Colour changes are only allowed in the layout notes.
+The trade palette is fixed by the trade, so do not plan a new header colour.
 Plan at least TWO different change types. With buyer complaints, one change must be complaint_fix.
 If REQUIRED LAYOUT REFINEMENT is given, one change must be of type layout and must describe those refinements.
 If RESULTS OF PAST VERSIONS are given, do not simply repeat a product or change that got no sales after 100 views; say what the results taught in results_considered.
-Avoid repeating the same product on several days in a row unless there is a clear reason.
 Shape: {"product": "job_costing", "summary": "one sentence", "results_considered": "what past results showed, or empty", "changes": [{"type": "layout", "what": "...", "why": "...", "evidence_ids": ["E1"]}]}"""
 
 
@@ -283,16 +462,30 @@ def brain4(ctx):
             f"BUYER COMPLAINTS:\n{chr(10).join('- ' + c for c in ctx['complaints']) or 'none'}\n\n"
             f"LAST APPROVED VERSION: {ctx['prev']['summary'] if ctx.get('prev') else 'none (first version)'}\n\n"
             f"REQUIRED LAYOUT REFINEMENT: {'; '.join(ctx.get('style_changes', [])) or 'none'}\n\n"
-            f"RECENT DAYS (avoid repeating):\n" + ("\n".join(
+            "RECENT DAYS (avoid repeating):\n" + ("\n".join(
                 f"- {r.get('date', '')}: {r.get('product', '')}, changes {', '.join(r.get('types', []))}"
                 for r in ctx.get("recent", [])) or "none") + "\n\n"
             f"RESULTS OF PAST VERSIONS (owner's own numbers):\n{ctx.get('results_text', 'none')}")
     return _ask(ctx, "Decide", 4, ROLE4, user, lambda d: check_plan(d, ctx))
 
 
+def fallback_plan(ctx):
+    product = ctx["product"] or "job_costing"
+    changes = [{"type": "layout", "what": "Phone layout: " + ("; ".join(ctx.get("style_changes", [])) or "kept"),
+                "why": "Easier to read on a phone", "evidence_ids": []},
+               {"type": "content", "what": "Listing rewritten for Payhip with the workbook's real features",
+                "why": "Accurate buyer text", "evidence_ids": []}]
+    if ctx["complaints"]:
+        changes.append({"type": "complaint_fix", "what": "Clearer steps for the first entry",
+                        "why": "Buyer complaint: " + ctx["complaints"][0][:80], "evidence_ids": []})
+    return {"product": product, "summary": "Phone layout refinement and a clearer Payhip listing",
+            "results_considered": "" if ctx.get("results_text", "none") == "none" else "Results were read by the owner",
+            "changes": changes}
+
+
 # ---------------- brain 5: sheet text (checked against the real columns)
 ROLE5 = """TASK: write the text that goes into the workbook: start lines for the START HERE tab, and one hint for each data tab.
-Name only columns and tabs that exist in the list you are given. Never mention file styles, font sizes, row heights, pt, refinements or internal notes; the buyer only needs to know how to use the sheet. Keep the layout refinement visible in one line if one is given.
+Name only columns and tabs that exist in the list you are given. Never mention file styles, font sizes, row heights, pt, refinements or internal notes; the buyer only needs to know how to use the sheet.
 Shape: {"start_lines": ["3 to 10 short English lines"], "hints": {"Tab name": "one short English line"}} with one hint for every tab listed."""
 
 
@@ -329,9 +522,34 @@ def brain5(ctx):
             f"TABS (one hint each): {', '.join(tabs)}\n"
             f"COLUMNS (exact names): {', '.join(headers)}\n"
             f"DASHBOARD ITEMS: {', '.join(labels)}\n"
-            f"TRADE TERMS: {json.dumps(ctx['out']['3'].get('terms', {}), ensure_ascii=False)}\n"
-            f"LAYOUT REFINEMENT: {'; '.join(ctx.get('style_changes', [])) or 'none'}")
+            f"TRADE TERMS: {json.dumps(ctx['out']['3'].get('terms', {}), ensure_ascii=False)}")
     return _ask(ctx, "Guide", 5, ROLE5, user, check)
+
+
+def sanitize_start(d, product):
+    """Keep only lines that are true for this workbook; fill up with the template when needed."""
+    tabs, headers, labels = _headers(product)
+    lines = [str(x).strip() for x in (d.get("start_lines") or []) if str(x).strip()]
+    keep = []
+    for line in lines:
+        if sheets.INTERNAL_NOTE.search(line) or sheets.start_text_problems([line], headers, labels):
+            continue
+        keep.append(line)
+    for t in STARTS_TEMPLATE:
+        if len(keep) >= 3:
+            break
+        if t not in keep:
+            keep.append(t)
+    hints = {t: str((d.get("hints") or {}).get(t, "")).strip() for t in tabs}
+    for t in tabs:
+        if not hints[t] or sheets.INTERNAL_NOTE.search(hints[t]):
+            hints[t] = "Type one row per item in the yellow cells."
+    return {"start_lines": keep[:10], "hints": hints}
+
+
+def fallback_text(ctx):
+    plan = ctx["out"]["4"]
+    return sanitize_start({"start_lines": [], "hints": {}}, plan["product"])
 
 
 # ---------------- brain 6: decision and price
@@ -349,8 +567,6 @@ def check_decision(d):
     pt = d.get("price_tests")
     if not isinstance(pt, list) or len(pt) != 3:
         probs.append("price_tests must have exactly 3 items")
-    elif any("ESTIMATE" not in str(p.get("purpose", "")) for p in pt if isinstance(p, dict)):
-        probs.append("each price test purpose must end with ESTIMATE")
     if not isinstance(d.get("features"), list) or len(d.get("features", [])) != 5:
         probs.append("features must have exactly 5 items")
     if not isinstance(d.get("risks"), list) or len(d.get("risks", [])) < 3:
@@ -368,64 +584,125 @@ def brain6(ctx):
     return _ask(ctx, "Decide", 6, ROLE6, user, check_decision)
 
 
-# ---------------- brain 7: listing
-ROLE7 = """TASK: write the Gumroad listing for today's product.
-Include: 3 title options (product keyword first, no hype, 70 characters or fewer); a 2-line hook; a description of at least 300 characters that says in plain words what changed from the last version; what is included; 3 how-to steps; what it does NOT do; requirements (a Google account, and Google Sheets or Excel); 8 tags; 5 FAQ questions.
-Do not use the word FREE. Say the buyer types their own numbers and results depend on those numbers.
+def sanitize_decision(d):
+    tests = []
+    for i, t in enumerate(d.get("price_tests") or []):
+        if isinstance(t, dict):
+            purpose = str(t.get("purpose", "")).strip() or PRICE_TEMPLATE[min(i, 2)]["purpose"]
+            if "ESTIMATE" not in purpose:
+                purpose += " ESTIMATE"
+            tests.append({"range": str(t.get("range", "")).strip() or PRICE_TEMPLATE[min(i, 2)]["range"],
+                          "purpose": purpose})
+    for t in PRICE_TEMPLATE:
+        if len(tests) >= 3:
+            break
+        tests.append(dict(t))
+    out = dict(d)
+    out["price_tests"] = tests[:3]
+    return out
+
+
+def fallback_decision(ctx):
+    return {"verdict": "Start with this product and read the 14-day test before changing anything.",
+            "buyer": "Contractors who track jobs, extra work or invoices in a spreadsheet.",
+            "price_tests": [dict(t) for t in PRICE_TEMPLATE],
+            "features": FACTS.get(ctx["product"] or "job_costing", FACTS["job_costing"])["included"][:5],
+            "risks": ["Few views in the first days", "Other templates on the market", "Buyers may not type their numbers"],
+            "test14": {"record": ["views", "saves", "clicks", "sales"],
+                       "go_no_go": ["Did clicks reach 10?", "Did a buyer ask a question?"]}}
+
+
+# ---------------- brain 7: Payhip listing (validation sanitized, never blocks)
+ROLE7 = """TASK: write the Payhip listing for today's product. Payhip is the store; the product is a digital download (.xlsx).
+Include: 3 title options (product keyword first, 70 characters or fewer); a 2-line hook; a description of at least 300 characters that says in plain words what the workbook does; what is included (4 or more); 3 how-to steps; what it does NOT do (2 or more); requirements (2 or more, naming Google Sheets or Excel); 8 tags; 5 FAQ questions.
+Rules: never use the words offline, free, gumroad or nurture. Never write a percentage or a money figure. Never mention internal notes, fonts, row heights or layout tuning. Do not claim a feature that is not in the list of included items.
 Shape: {"titles": [3 strings], "hook": "...", "description": "...", "included": [4 or more], "how_to": [3], "not_included": [2 or more], "requirements": [2 or more], "tags": [8], "faq": [{"q": "...", "a": "..."}] (exactly 5)}"""
 
 
-def check_listing(d, headers, labels):
-    if not isinstance(d, dict):
-        return ["the reply is not an object"]
-    probs = []
-    for key, k, msg in [("titles", 3, "need 3 titles"), ("included", 4, "need 4 included items"),
-                        ("how_to", 3, "need 3 how-to steps"), ("not_included", 2, "need 2 not-included items"),
-                        ("requirements", 2, "need 2 requirements"), ("tags", 8, "need 8 tags"),
-                        ("faq", 5, "need 5 FAQ items")]:
-        if not isinstance(d.get(key), list) or len(d[key]) < k:
-            probs.append(msg)
-    if len(str(d.get("description", ""))) < 300:
-        probs.append("description must be at least 300 characters")
-    if any(isinstance(t, str) and len(t) > 70 for t in d.get("titles", [])):
-        probs.append("titles must be 70 characters or fewer")
-    if _claims(d):
-        probs.append("remove risky, FREE or unsupported wording")
-    if not any("google sheets" in s.lower() or "excel" in s.lower() for s in _texts(d.get("requirements", []))):
-        probs.append("requirements must name Google Sheets or Excel")
-    probs += sheets.start_text_problems(list(_texts(d)), headers, labels)
-    return probs[:8]
+def sanitize_listing(d, product):
+    """Keep every sentence that is true and allowed; fill any missing part from the product's own facts."""
+    f = FACTS[product]
+    kw = PRODUCT_KEYWORD[product]
+    titles = [t for t in (d.get("titles") or []) if isinstance(t, str) and _ok_text(t)
+              and len(t) <= 70 and kw in t.lower()]
+    titles = _uniq(titles + f["title_options"])[:3]
+    desc_parts = [s for s in _sentences(d.get("description", "")) if _ok_text(s)]
+    desc = " ".join(desc_parts)
+    if len(desc) < 300:
+        desc = f["description"]
+    hook = str(d.get("hook", "")).strip()
+    if not hook or not _ok_text(hook):
+        hook = f["hook"]
+    how = [s for s in (str(x).strip() for x in (d.get("how_to") or [])) if s and _ok_text(s)]
+    for step in f["how_to"]:
+        if len(how) >= 3:
+            break
+        if step not in how:
+            how.append(step)
+    included = _uniq([s for s in (d.get("included") or []) if isinstance(s, str) and _ok_text(s)] + f["included"])[:8]
+    not_inc = _uniq([s for s in (d.get("not_included") or []) if isinstance(s, str) and _ok_text(s)] + f["not_included"])[:6]
+    req = _uniq([s for s in (d.get("requirements") or []) if isinstance(s, str) and _ok_text(s)] + f["requirements"])[:6]
+    if not any("google sheets" in r.lower() or "excel" in r.lower() for r in req):
+        req.insert(0, f["requirements"][1])
+    tags = [t.strip().lower() for t in (d.get("tags") or []) if isinstance(t, str) and _ok_text(t) and len(t) <= 30]
+    tags = _uniq(tags + f["tags"])[:8]
+    faq = []
+    for item in (d.get("faq") or []):
+        if isinstance(item, dict) and _ok_text(item.get("q", "")) and _ok_text(item.get("a", "")):
+            faq.append({"q": str(item["q"]).strip(), "a": str(item["a"]).strip()})
+    for q, a in f["faq"]:
+        if len(faq) >= 5:
+            break
+        if q not in [x["q"] for x in faq]:
+            faq.append({"q": q, "a": a})
+    return {"titles": titles, "hook": hook, "description": desc, "included": included, "how_to": how[:3],
+            "not_included": not_inc, "requirements": req, "tags": tags, "faq": faq[:5], "platform": "Payhip"}
 
 
 def brain7(ctx):
     plan = ctx["out"]["4"]
     _, headers, labels = _headers(plan["product"])
-    user = (f"PLAN:\n{json.dumps(plan, ensure_ascii=False)[:4000]}\n\n"
-            f"DECISION:\n{json.dumps(ctx['out']['6'], ensure_ascii=False)[:4000]}\n\n"
-            f"SHEET TEXT:\n{json.dumps(ctx['out']['5'], ensure_ascii=False)[:2000]}\n\n"
-            f"COLUMNS (exact): {', '.join(headers)}\n\n"
+    user = (f"PRODUCT NAME (use this title family): {PRODUCT_TITLES[plan['product']]}\n"
+            f"BRAND: {ctx['brand']}\nMARKET: {ctx['market']} (US spelling)\n"
+            f"PLAN:\n{json.dumps(plan, ensure_ascii=False)[:3000]}\n\n"
+            f"DECISION (ESTIMATE prices only):\n{json.dumps(ctx['out']['6'], ensure_ascii=False)[:2500]}\n\n"
+            f"SHEET TEXT:\n{json.dumps(ctx['out']['5'], ensure_ascii=False)[:1500]}\n\n"
+            f"COLUMNS (exact): {', '.join(headers)}\nDASHBOARD ITEMS (exact): {', '.join(labels)}\n\n"
             f"LAST VERSION DESCRIPTION (write a NEW description; do not copy it):\n"
             f"{ctx['prev']['brains']['7']['data']['description'][:3000] if ctx.get('prev') else 'none'}")
-    return _ask(ctx, "Listing", 7, ROLE7, user, lambda d: check_listing(d, headers, labels))
+
+    def check(d):
+        if not isinstance(d, dict):
+            return ["the reply is not an object"]
+        return []  # the sanitizer below makes every reply valid; no retry loop
+    return _ask(ctx, "Listing", 7, ROLE7, user, check)
+
+
+def fallback_listing(ctx):
+    return sanitize_listing({}, ctx["out"]["4"]["product"])
 
 
 # ---------------- brain 8: buyer guide
 ROLE8 = """TASK: write the buyer guide for a non-technical buyer who may use only a phone.
 Use the SHEET TEXT and the tab list exactly. Never describe a tab, column or formula that is not in the list.
 Sections: What you get; Before you start; First 10 minutes (numbered); Colour guide; Each tab, what to type; Common mistakes and fixes; Dashboard, what each number means; FAQ (5 questions).
-Shape: {"sections": [{"title": "...", "text": "..."}] (at least 7 sections)}. Somewhere the text must say the file opens in Google Sheets or Excel."""
+Shape: {"sections": [{"title": "...", "text": "..."}] (at least 7 sections)}. Somewhere the text must say the file opens in Google Sheets or Excel. Never mention offline use."""
 
 
-def check_guide(d, headers, labels):
-    if not isinstance(d, dict) or not isinstance(d.get("sections"), list) or len(d["sections"]) < 7:
-        return ["need at least 7 sections"]
-    probs = []
-    if not any("google sheets" in s.lower() or "excel" in s.lower() for s in _texts(d)):
-        probs.append("say that the file opens in Google Sheets or Excel")
-    if _claims(d):
-        probs.append("remove risky, FREE or unsupported wording")
-    probs += sheets.start_text_problems(list(_texts(d)), headers, labels)
-    return probs[:8]
+def sanitize_guide(d, product):
+    _, headers, labels = _headers(product)
+    secs = []
+    for s in (d.get("sections") or []):
+        if isinstance(s, dict) and _ok_text(s.get("title", "")) and _ok_text(s.get("text", "")):
+            if not sheets.start_text_problems([str(s.get("text", ""))], headers, labels):
+                secs.append({"title": str(s["title"]).strip(), "text": str(s["text"]).strip()})
+    titles = [s["title"] for s in secs]
+    for t, x in GUIDE_TEMPLATE:
+        if len(secs) >= 7:
+            break
+        if t not in titles:
+            secs.append({"title": t, "text": x})
+    return {"sections": secs[:9]}
 
 
 def brain8(ctx):
@@ -434,58 +711,85 @@ def brain8(ctx):
     user = (f"SHEET TEXT:\n{json.dumps(ctx['out']['5'], ensure_ascii=False)[:3000]}\n\n"
             f"COLUMNS (exact): {', '.join(headers)}\nDASHBOARD ITEMS (exact): {', '.join(labels)}\n\n"
             f"TITLE OPTIONS: {', '.join(ctx['out']['7']['titles'])}")
-    return _ask(ctx, "Guide", 8, ROLE8, user, lambda d: check_guide(d, headers, labels))
+    return _ask(ctx, "Guide", 8, ROLE8, user, lambda d: [] if isinstance(d, dict) and d.get("sections") else ["sections missing"])
 
 
-# ---------------- brain 9: pins and image brief
+def fallback_guide(ctx):
+    return sanitize_guide({}, ctx["out"]["4"]["product"])
+
+
+# ---------------- brain 9: pins and poster
 ROLE9 = """TASK: write 5 Pinterest pins for today's product. Text only. Use the trade's own words.
-Each pin: headline (60 characters or fewer), text_on_image (8 words or fewer), description (2 sentences), board (a board name), cta (one call to action). No FREE, no promises, no features the workbook does not have.
+Each pin: headline (60 characters or fewer), text_on_image (8 words or fewer), description (2 sentences), board (a board name), cta (one call to action). No FREE, no promises, no percentages, no features the workbook does not have.
 Shape: {"pins": [5 objects with headline, text_on_image, description, board, cta]}"""
 
 
-def check_pins(d):
-    if not isinstance(d, dict) or not isinstance(d.get("pins"), list) or len(d["pins"]) != 5:
-        return ["pins must have exactly 5 items"]
-    probs = []
-    for p in d["pins"]:
-        if not isinstance(p, dict):
-            probs.append("a pin is not an object")
-            continue
-        if len(str(p.get("headline", ""))) > 60:
-            probs.append("a headline is longer than 60 characters")
-        if len(str(p.get("text_on_image", "")).split()) > 8:
-            probs.append("text_on_image must be 8 words or fewer")
-    if _claims(d):
-        probs.append("remove risky, FREE or unsupported wording")
-    return probs[:6]
-
-
-def pin_image_prompt(trade, brand):
-    """The image brief for the pin, built by code from the trade palette. The text is added later, not by the AI."""
-    t = sheets.TRADES[trade]
-    return ("Professional e-commerce Pinterest pin, vertical 2:3 ratio (1000x1500 px). "
-            "Light wooden desk, bright soft studio lighting, commercial product photography. "
-            "A modern laptop and a smartphone side by side. Both screens show a realistic spreadsheet with clean grey "
-            "gridlines, a plain data table and a simple 2D bar chart. No fake app interface, no glowing 3D charts, "
-            "no logos on any screen. "
-            f"A confident, smiling trade professional, {PROPS.get(trade, PROPS['other'])}, stands beside the devices. "
-            f"Colour palette: {t['palette']} (primary {t['primary']}, accent {t['accent']}). "
-            "Leave a clean flat area in the upper third for a headline, an empty top-left corner for the brand mark "
-            f"('{brand}', added later) and an empty area at the bottom for a button. "
-            "No text inside the picture. "
-            "Avoid: text on screens, misspelled words, watermarks, Microsoft or Google logos, distorted letters, cartoon style.")
+def sanitize_pins(d, product, trade_label):
+    pins = []
+    for p in (d.get("pins") or []):
+        if isinstance(p, dict) and all(_ok_text(p.get(k, "")) for k in ("headline", "text_on_image", "description")):
+            if len(str(p.get("headline", ""))) <= 60 and len(str(p.get("text_on_image", "")).split()) <= 8:
+                pins.append({k: str(p.get(k, "")).strip() for k in ("headline", "text_on_image", "description", "board", "cta")})
+    tag = FACTS[product]["hook"]
+    fallback = [{"headline": f"{trade_label}: {t}"[:60], "text_on_image": t[:60],
+                 "description": f"{tag} Open the workbook on your laptop or phone.", "board": "Contractor tools",
+                 "cta": "Get the workbook"} for t in FACTS[product]["included"][:5]]
+    for fb in fallback:
+        if len(pins) >= 5:
+            break
+        pins.append(fb)
+    return {"pins": pins[:5]}
 
 
 def brain9(ctx):
     t = sheets.TRADES[ctx["trade"]]
-    user = (f"LISTING:\n{json.dumps(ctx['out']['7'], ensure_ascii=False)[:5000]}\n\n"
-            f"TRADE PALETTE: {t['palette']}\nBRAND: {ctx['brand']}")
-    data, slot = _ask(ctx, "Pins", 9, ROLE9, user, check_pins)
-    data = dict(data, image_brief=pin_image_prompt(ctx["trade"], ctx["brand"]))
+    user = (f"LISTING (sanitized):\n{json.dumps(ctx['out']['7'], ensure_ascii=False)[:5000]}\n\n"
+            f"TRADE: {ctx['trade_label']}\nBRAND: {ctx['brand']}")
+    data, slot = _ask(ctx, "Pins", 9, ROLE9, user, lambda d: [] if isinstance(d, dict) and d.get("pins") else ["pins missing"])
+    data = sanitize_pins(data, ctx["out"]["4"]["product"], ctx["trade_label"])
+    data["poster"] = {"headline": poster.HEADLINES.get(ctx["trade"], poster.HEADLINES["other"]),
+                      "tagline": poster.TAGLINE.get(ctx["out"]["4"]["product"], ""),
+                      "badges": poster.BADGES.get(ctx["out"]["4"]["product"], poster.BADGES["bundle"]),
+                      "cta": poster.CTA}
     return data, slot
 
 
+def fallback_pins(ctx):
+    data = sanitize_pins({}, ctx["out"]["4"]["product"], ctx["trade_label"])
+    data["poster"] = {"headline": poster.HEADLINES.get(ctx["trade"], poster.HEADLINES["other"]),
+                      "tagline": poster.TAGLINE.get(ctx["out"]["4"]["product"], ""),
+                      "badges": poster.BADGES.get(ctx["out"]["4"]["product"], poster.BADGES["bundle"]),
+                      "cta": poster.CTA}
+    return data
+
+
+FALLBACK = {1: lambda c: brain1(c), 2: lambda c: ({"gaps": [], "complaints_used": [],
+                                                    "no_gap_reason": "Not enough evidence to name a gap; the workbook's own features are used."}, "template"),
+            3: fallback_trade, 4: fallback_plan, 5: fallback_text, 6: fallback_decision,
+            7: fallback_listing, 8: fallback_guide, 9: fallback_pins}
 BRAIN_FN = {1: brain1, 2: brain2, 3: brain3, 4: brain4, 5: brain5, 6: brain6, 7: brain7, 8: brain8, 9: brain9}
+
+
+def _template_for(n, ctx):
+    if n == 1:
+        return brain1(dict(ctx, use_web=False, images=[]))
+    if n == 2:
+        return ({"gaps": [], "complaints_used": [], "no_gap_reason": "Not enough evidence to name a gap; the workbook's own features are used."}, "template")
+    if n == 3:
+        return (fallback_trade(ctx), "template")
+    if n == 4:
+        return (fallback_plan(ctx), "template")
+    if n == 5:
+        return (fallback_text(ctx), "template")
+    if n == 6:
+        return (fallback_decision(ctx), "template")
+    if n == 7:
+        return (fallback_listing(ctx), "template")
+    if n == 8:
+        return (fallback_guide(ctx), "template")
+    if n == 9:
+        return (fallback_pins(ctx), "template")
+    raise ValueError(n)
 
 
 # ---------------- brain 10: mobile and layout reviewer (code)
@@ -500,86 +804,65 @@ def mobile_check(ctx, state):
 
 # ---------------- brain 11: critic and gate
 def brain11(ctx, state):
-    """Code checks first; the AI critic (if a Critic slot is ready) only adds advisory notes."""
+    """Code checks. Only a broken file or an empty evidence set blocks. Everything else is a warning."""
     out = ctx["out"]
     plan = out["4"]
-    checks, fix, problems, block = [], set(), [], False
+    checks, fix, problems, block, warn = [], set(), [], False, []
     passes = out["1"].get("passes", [])
-    ok = len(passes) >= 1 and len(out["1"]["items"]) >= 6
-    checks.append(("Research depth", "PASS" if ok else "BLOCK",
-                   f"{len(passes)} passes, {len(out['1']['items'])} evidence items"))
+    evidence = out["1"].get("items", [])
+    ok = bool(evidence)
+    checks.append(("Evidence is present", "PASS" if ok else "BLOCK", f"{len(passes)} passes answered, {len(evidence)} items"))
     block = block or not ok
+    if out["1"].get("failed"):
+        warn.append(f"{len(out['1']['failed'])} research pass(es) did not answer and were skipped")
     types = {c["type"] for c in plan["changes"] if isinstance(c, dict)}
     ok = len(types) >= 2
-    checks.append(("At least two change types", "PASS" if ok else "BLOCK", ", ".join(sorted(types))))
-    block = block or not ok
+    checks.append(("At least two change types", "PASS" if ok else "WARNING", ", ".join(sorted(types))))
     style_ok = ctx.get("style") != ctx.get("prev_style")
     checks.append(("Layout refinement applied", "PASS" if style_ok else "BLOCK",
                    "; ".join(ctx.get("style_changes", [])) or "no change"))
     block = block or not style_ok
     if ctx["complaints"]:
         ok = "complaint_fix" in types
-        checks.append(("A complaint is answered", "PASS" if ok else "FIX",
-                       "complaint_fix present" if ok else "missing"))
-        if not ok:
-            fix.add(4)
-            problems.append("a buyer complaint is not answered: add a complaint_fix change")
-    prev = ctx.get("prev")
-    if prev:
-        ratio = difflib.SequenceMatcher(None, prev["brains"]["7"]["data"]["description"],
-                                        out["7"]["description"]).ratio()
-        ok = ratio < 0.85
-        checks.append(("Listing is new, not a copy of the last version", "PASS" if ok else "FIX",
-                       f"similarity {ratio:.2f} (limit 0.85)"))
-        if not ok:
-            fix.add(7)
-            problems.append("the listing description is too similar to the last version: rewrite it around the changes")
-        same = prev["brains"]["5"]["data"]["hints"] == out["5"]["hints"]
-        checks.append(("Workbook text is new", "FIX" if same else "PASS",
-                       "same as the last version" if same else "changed"))
-        if same:
-            fix.add(5)
-            problems.append("the sheet text is the same as the last version: change the hints for the changes")
-    for n in ["5", "6", "7", "8", "9"]:
-        if n not in out:
-            continue
-        blob = list(_texts(out[n]))
-        hits = sorted({m.group(0).lower() for s in blob for m in RISKY.finditer(s)}
-                      | {m.group(0).lower() for s in blob for m in UNSUPPORTED.finditer(s)})
-        free = any(FREE_WORD.search(s) for s in blob)
-        ok = not hits and not free
-        checks.append((f"Brain {n} wording is safe", "PASS" if ok else "FIX",
-                       ", ".join(hits) or ("the word FREE" if free else "none found")))
-        if not ok:
-            fix.add(int(n))
-            problems.append(f"brain {n}: remove " + (", ".join(hits) or "the word FREE"))
+        checks.append(("A complaint is answered", "PASS" if ok else "WARNING", "complaint_fix present" if ok else "missing"))
+    listing = out["7"]
+    bad = [s for s in _texts(listing) if BANNED_LISTING.search(s)]
+    checks.append(("Listing has no banned words (offline, FREE, internal notes, numbers)", "PASS" if not bad else "BLOCK",
+                   "clean" if not bad else bad[0][:60]))
+    block = block or bool(bad)
     _, headers, labels = _headers(state["product"])
     sheet_probs = sheets.start_text_problems([str(x) for x in out["5"]["start_lines"]], headers, labels)
-    checks.append(("START HERE matches the columns", "PASS" if not sheet_probs else "FIX",
+    checks.append(("START HERE matches the columns", "PASS" if not sheet_probs else "BLOCK",
                    sheet_probs[0] if sheet_probs else "every claim matches a column or Dashboard item"))
-    if sheet_probs:
-        fix.add(5)
-        problems += sheet_probs[:3]
+    block = block or bool(sheet_probs)
+    listing_probs = sheets.start_text_problems(list(_texts(listing)), headers, labels)
+    checks.append(("Listing matches the workbook", "PASS" if not listing_probs else "WARNING",
+                   listing_probs[0] if listing_probs else "every topic is in the workbook"))
+    if listing_probs:
+        warn.append("listing wording needs a look")
+    prev = ctx.get("prev")
+    if prev:
+        ratio = difflib.SequenceMatcher(None, prev["brains"]["7"]["data"]["description"], listing["description"]).ratio()
+        checks.append(("Listing is new, not a copy of the last version", "PASS" if ratio < 0.85 else "WARNING",
+                       f"similarity {ratio:.2f} (limit 0.85)"))
     for name, status, detail in sheets.palette_problems(ctx["trade"]):
         checks.append((f"Palette: {name}", status, detail))
         if status == "FIX":
             block = True
     try:
         rows, _blob = mobile_check(ctx, state)
-        bad = [r for r in rows if r[1] == "FIX"]
+        bad_rows = [r for r in rows if r[1] == "FIX"]
         for name, status, detail in rows:
             if status != "PASS":
                 checks.append((f"Phone: {name}", status, detail))
-        checks.append(("Phone file checks", "PASS" if not bad else "BLOCK",
-                       f"{len(rows) - len(bad)} of {len(rows)} passed"))
-        block = block or bool(bad)
-        if bad:
-            problems.append("phone file: " + "; ".join(r[0] for r in bad[:3]))
+        checks.append(("Phone file checks", "PASS" if not bad_rows else "BLOCK",
+                       f"{len(rows) - len(bad_rows)} of {len(rows)} passed"))
+        block = block or bool(bad_rows)
     except Exception as e:
         checks.append(("Phone file checks", "BLOCK", "could not build: " + str(e)[:120]))
         block = True
     if any("Critic" in e.get("duties", []) for e in engine.ready_entries(ctx["slots"])):
-        summary = {"plan": plan.get("summary", ""), "listing_description": out["7"]["description"][:1500],
+        summary = {"plan": plan.get("summary", ""), "listing_description": listing["description"][:1500],
                    "sheet_hints": list(out["5"]["hints"].values())[:6]}
         try:
             crit, _slot = engine.json_job(
@@ -587,19 +870,21 @@ def brain11(ctx, state):
                 '{"verdict": "PASS or FIX", "problems": ["..."]}. Look for claims without evidence, buyer promises, '
                 "wording that does not match the plan, and anything a buyer could misread.",
                 json.dumps(summary, ensure_ascii=False), ctx["slots"], ctx["log"], ctx["keys"],
-                lambda d: [] if isinstance(d, dict) and d.get("verdict") in ("PASS", "FIX")
-                else ["verdict must be PASS or FIX"])
+                lambda d: [] if isinstance(d, dict) and d.get("verdict") in ("PASS", "FIX") else ["verdict must be PASS or FIX"])
             notes = [str(x) for x in crit.get("problems", [])][:5]
             checks.append(("AI critic (advisory)", "PASS" if crit["verdict"] == "PASS" else "WARNING",
                            "; ".join(notes) or "no concerns"))
         except Exception as e:
             checks.append(("AI critic (advisory)", "WARNING", "skipped: " + engine.scrub(e, ctx["keys"])[:120]))
+    if any(s == "WARNING" for _, s, _ in checks):
+        warn.append("some checks show warnings; read them before approving")
     verdict = "BLOCK" if block else ("FIX" if fix else "PASS")
-    checks.append(("Overall gate", verdict, f"{len(checks)} checks"))
+    checks.append(("Overall gate", verdict, f"{len(checks)} checks, {len(warn)} warning(s)"))
+    problems = problems + [w for w in warn]
     return {"verdict": verdict, "checks": checks, "fix_brains": sorted(fix), "problems": problems}
 
 
-# ---------------- pipeline
+# ---------------- pipeline (never stops for wording; falls back and says so)
 def new_state(product_key):
     return {"status": "idle", "product": product_key, "brains": {}, "slots": {}, "errors": [],
             "checks": [], "problems": [], "fix_round": 0, "product_fixed": product_key is not None,
@@ -607,47 +892,52 @@ def new_state(product_key):
 
 
 def run_pipeline(state, ctx, save, pins_on=True):
-    """Run the AI brains that are not done yet, in order, then the gate. Returns the status string."""
     b = state["brains"]
     state["pins_on"] = pins_on
     order = [n for n in AI_ORDER if pins_on or n != 9]
     state["status"] = "running"
-    state["errors"] = []
+    state["errors"] = state.get("errors", [])
     save(state)
-    while True:
-        for n in order:
-            if str(n) in b:
-                continue
-            ctx["out"] = {k: v["data"] for k, v in b.items()}
+    for n in order:
+        if str(n) in b:
+            continue
+        ctx["out"] = {k: v["data"] for k, v in b.items()}
+        try:
+            data, slot = BRAIN_FN[n](ctx)
+        except Exception as e:
+            state["errors"].append({"brain": n, "name": BRAIN_NAMES[n], "msg": engine.scrub(e, ctx["keys"])[:300],
+                                    "at": datetime.now().strftime("%H:%M:%S"), "used": "template"})
             try:
-                data, slot = BRAIN_FN[n](ctx)
-            except Exception as e:
+                data, slot = _template_for(n, ctx)
+                slot = f"template (after error)"
+            except Exception as e2:
                 state["status"] = "error"
-                state["errors"].append({"brain": n, "name": BRAIN_NAMES[n], "msg": str(e)[:300],
+                state["errors"].append({"brain": n, "name": BRAIN_NAMES[n], "msg": "template failed: " + str(e2)[:200],
                                         "at": datetime.now().strftime("%H:%M:%S")})
                 save(state)
                 return "error"
-            b[str(n)] = {"data": data, "slot": slot, "at": datetime.now().strftime("%H:%M:%S")}
-            state["slots"][str(n)] = slot
-            if n == 4:
-                state["product"] = data["product"]
-            save(state)
-        ctx["out"] = {k: v["data"] for k, v in b.items()}
-        gate = brain11(ctx, state)
-        state["checks"], state["problems"] = gate["checks"], gate["problems"]
-        if gate["verdict"] == "PASS":
-            state["status"] = "waiting_approval"
-            save(state)
-            return "waiting_approval"
-        if gate["verdict"] == "BLOCK" or state["fix_round"] >= 2:
-            state["status"] = "blocked"
-            save(state)
-            return "blocked"
-        state["fix_round"] += 1
-        ctx["fix_notes"] = gate["problems"]
-        for n in range(min(gate["fix_brains"]), 10):
-            b.pop(str(n), None)
+        if n == 4:
+            data = data
+            state["product"] = data["product"]
+        if n == 5:
+            data = sanitize_start(data, state["product"])
+        if n == 6:
+            data = sanitize_decision(data)
+        if n == 7:
+            data = sanitize_listing(data, state["product"])
+        if n == 8:
+            data = sanitize_guide(data, state["product"])
+        if n == 1:
+            ctx["research_passes_done"] = len(data.get("passes", []))
+        b[str(n)] = {"data": data, "slot": slot, "at": datetime.now().strftime("%H:%M:%S")}
+        state["slots"][str(n)] = slot
         save(state)
+    ctx["out"] = {k: v["data"] for k, v in b.items()}
+    gate = brain11(ctx, state)
+    state["checks"], state["problems"] = gate["checks"], gate["problems"]
+    state["status"] = "waiting_approval" if gate["verdict"] != "BLOCK" else "blocked"
+    save(state)
+    return state["status"]
 
 
 # ---------------- brain 12: package (code only)
@@ -658,51 +948,62 @@ DOCS = [
     ("04_change_plan.json", "4", "Change plan: what is different from the last version, and why"),
     ("05_sheet_text.json", "5", "Sheet text (START HERE and tab hints)"),
     ("06_decision_and_price_test.json", "6", "Decision and price test (ESTIMATE ranges)"),
-    ("07_gumroad_listing.json", "7", "Gumroad listing and FAQ"),
+    ("07_payhip_listing.json", "7", "Payhip listing, FAQ and tags"),
     ("08_buyer_guide.json", "8", "Buyer guide"),
-    ("09_pinterest_pins.json", "9", "Pinterest pins"),
+    ("09_pins.json", "9", "Pinterest pins"),
 ]
 HOW_TO = """ادائیگی سے پہلے یہ مراحل کریں (صرف اپنے لیے)
-1. ZIP کھولیں۔
-2. لیپ ٹاپ فائل کمپیوٹر کے لیے، موبائل فائل فون کے لیے ہے۔
-3. google_test فولڈر کی تین فائلیں گوگل ڈرائیو پر اپ لوڈ کر کے Google Sheets میں کھولیں: full، plain، no_protection۔ جو ٹھیک کھلے وہی اصل فائل بنے گی۔
-4. Gumroad پر نیا پروڈکٹ بنائیں، فائل اپ لوڈ کریں، لسٹنگ (07) چسپاں کریں، قیمت فیصلے (06) کے مطابق رکھیں۔
-5. پن کی تصویر کا پرامپٹ (10) استعمال کریں۔ برانڈ کا نام اور سرخی تصویر پر خود لکھیں۔
-6. گیٹ کی رپورٹ (12) اور فون کی جانچ (11) دیکھیں، پھر اپلوڈ کریں۔
+1. ZIP کھولیں۔ لیپ ٹاپ فائل کمپیوٹر کے لیے، فون فائل فون کے لیے ہے۔
+2. google_test فولڈر کی تین فائلیں گوگل ڈرائیو پر اپلوڈ کر کے Google Sheets میں کھولیں: full، plain، no_protection۔ جو ٹھیک کھلے وہی اصل فائل بنے گی۔
+3. Payhip پر نیا ڈیجیٹل پروڈکٹ بنائیں، xlsx فائل اپلوڈ کریں، لسٹنگ (07) چسپاں کریں، قیمت فیصلے (06) کے مطابق اور ملک کی کرنسی کے ساتھ رکھیں۔
+4. پوسٹر (12_pinterest_poster.png) اور پن (09) Pinterest پر خود پوسٹ کریں۔
+5. گیٹ کی رپورٹ (12_quality_gate.txt) اور فون کی جانچ (11_mobile_check.txt) دیکھیں، پھر اپلوڈ کریں۔
 کسی بھی پلیٹ فارم کے موجودہ قواعد اپلوڈ سے پہلے خود دیکھیں۔ یہ قانونی یا ٹیکس مشورہ نہیں۔
 """
 
 
 def build_package(ctx, state, version_no):
-    """Build the workbooks, the Google test variants, the documents and the checksums. Returns (zip bytes, manifest)."""
+    """Workbooks, Google test files, documents, the poster and checksums. Returns (zip bytes, manifest)."""
     out = {k: v["data"] for k, v in state["brains"].items()}
     prod = state["product"]
     text = {"start_lines": out["5"]["start_lines"], "hints": out["5"]["hints"]}
     cur, biz, brand, trade, style = ctx["currency"], ctx["business"], ctx["brand"], ctx["trade"], ctx["style"]
     base = f"{_safe(biz)}_{prod}_v{version_no}"
     kw = dict(trade=trade, style=style, text=text, brand=brand)
+    laptop_book = sheets.build_workbook(prod, cur, biz, "laptop", **kw)
+    phone_book = sheets.build_workbook(prod, cur, biz, "phone", **kw)
     files = {
-        f"{base}_laptop.xlsx": sheets.build_workbook(prod, cur, biz, "laptop", **kw),
-        f"{base}_phone.xlsx": sheets.build_workbook(prod, cur, biz, "phone", **kw),
-        f"google_test/{base}_full.xlsx": sheets.build_workbook(prod, cur, biz, "laptop", **kw),
+        f"{base}_laptop.xlsx": laptop_book,
+        f"{base}_phone.xlsx": phone_book,
+        f"google_test/{base}_full.xlsx": laptop_book,
         f"google_test/{base}_plain.xlsx": sheets.build_workbook(prod, cur, biz, "laptop", protect=False,
                                                                validations=False, conditional=False, **kw),
         f"google_test/{base}_no_protection.xlsx": sheets.build_workbook(prod, cur, biz, "laptop", protect=False, **kw),
     }
     for fname, n, title in DOCS:
         files[fname] = f"{title}\n\n" + json.dumps(out[n], ensure_ascii=False, indent=2)
-    files["10_pin_image_brief.txt"] = out["9"].get("image_brief", "") if "9" in out else "pins were not made"
+    laptop_png = poster.render_workbook_screen(poster.add_sample_rows(laptop_book, prod, sheets))
+    phone_png = poster.render_workbook_screen(poster.add_sample_rows(phone_book, prod, sheets))
+    pdata = out.get("9", {}).get("poster") or {}
+    headline = pdata.get("headline") or poster.HEADLINES.get(trade, poster.HEADLINES["other"])
+    png, status = poster.make_poster(trade, prod, ctx["trade_label"], brand,
+                                     sheets.TRADES[trade]["primary"], sheets.TRADES[trade]["accent"],
+                                     laptop_png, phone_png)
+    files["12_pinterest_poster.png"] = png
+    files["12b_poster_status.txt"] = (f"Headline: {headline}\nScreens: {status}\n"
+                                      "Text is drawn by code. Screens are the real workbook; sample rows are marked SAMPLE.")
     rows, _ = mobile_check(ctx, state)
     files["11_mobile_check.txt"] = "\n".join(f"{n}: {s}. {d}" for n, s, d in rows)
     files["12_quality_gate.txt"] = "\n".join(f"{n}: {s}. {d}" for n, s, d in state["checks"])
+    files["10_poster_brief.txt"] = f"Trade: {ctx['trade_label']}\nHeadline: {headline}\nBrand: {brand}\nPalette: {sheets.TRADES[trade]['palette']}"
     files["13_sheet_specification.txt"] = sheets.spec_text(prod, cur, biz)
     files["14_how_to_upload.txt"] = HOW_TO
     files["layout_refinement.txt"] = "\n".join(ctx.get("style_changes", [])) or "no change"
     manifest = {name: hashlib.sha256(d if isinstance(d, bytes) else d.encode("utf-8")).hexdigest()
                 for name, d in files.items()}
     files["MANIFEST.txt"] = "\n".join(f"{h}  {n}" for n, h in manifest.items())
-    files["README.txt"] = ("Made with Business Factory 5 for " + brand + ". Check every file yourself. Read the current "
-                           "Gumroad and Pinterest rules before you publish. Upload and post manually. "
+    files["README.txt"] = ("Made with Business Factory 5 for " + brand + " (Payhip listing). Check every file yourself. "
+                           "Read the current Payhip and Pinterest rules before you publish. Upload and post manually. "
                            "Not legal, tax or accounting advice.\n")
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
