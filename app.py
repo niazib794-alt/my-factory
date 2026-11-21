@@ -73,25 +73,22 @@ def google_test_zip(zip_bytes):
 
 
 def models_ready(slots, tav_keys):
-    """The product part opens only when every key that is on has passed the test this session."""
+    """The product opens when at least one AI key and, if Tavily keys are set, one Tavily key have passed
+    the test this session. Keys that failed are named as warnings; the run uses the keys that work."""
     status = ss.get("key_status", {})
     ready = engine.ready_entries(slots)
     if not ready:
         return False, "No AI key is on and filled. Turn on at least one key in the sidebar."
-    bad = []
-    for e_ in ready:
-        ok_ = status.get(e_["name"], (None, ""))[0]
-        if ok_ is not True:
-            bad.append(e_["name"] + (" (not tested)" if ok_ is None else " (failed)"))
-    for i in range(1, len(tav_keys) + 1):
-        ok_ = status.get(f"Tavily {i}", (None, ""))[0]
-        if ok_ is not True:
-            bad.append(f"Tavily {i}" + (" (not tested)" if ok_ is None else " (failed)"))
-    if bad:
-        return False, ("Test the models first. Not ready: " + ", ".join(bad)
-                       + ". Press 'Test all keys now' in the sidebar, or switch off a key that does not work.")
-    return True, f"All {len(ready)} AI keys and {len(tav_keys)} Tavily key(s) passed the test."
-
+    passed = [e_["name"] for e_ in ready if status.get(e_["name"], (None, ""))[0] is True]
+    if not passed:
+        return False, ("Test the models first. Press 'Test all keys now' in the sidebar. "
+                       "No AI key has passed yet.")
+    tav_ok = [i for i in range(1, len(tav_keys) + 1) if status.get(f"Tavily {i}", (None, ""))[0] is True]
+    if tav_keys and not tav_ok:
+        return False, "Test the Tavily key first: press 'Test all keys now' in the sidebar."
+    failed = [e_["name"] for e_ in ready if status.get(e_["name"], (None, ""))[0] is False]
+    note = f" Failed keys are skipped for this run: {', '.join(failed)}." if failed else ""
+    return True, f"{len(passed)} AI key(s) and {len(tav_ok)} Tavily key(s) passed the test.{note}"
 
 def chip(text, colour):
     return f"<span class='bf-chip' style='background:#{colour}'>{text}</span>"
@@ -167,6 +164,7 @@ with st.sidebar:
     clicked = st.button("Test all keys now", type="primary", key="sb_test_all")
     status_map = ss.get("key_status", {})
     if clicked:
+        engine.revive_all()
         ss["key_status"] = {}
         status_map = ss["key_status"]
         total_tests = len(ready_now) + len(tav_keys)
@@ -472,7 +470,11 @@ with tab_make:
                          "answered by": "code"})
         st.table(rows)
         for e in state.get("errors", []):
-            st.error(f"Brain {e['brain']} ({e['name']}) at {e['at']}: {e['msg']}")
+            if e.get("used"):
+                st.warning(f"Brain {e['brain']} ({e['name']}) at {e['at']}: {e['msg']}. "
+                           "The template was used for this part and the run continued.")
+            else:
+                st.error(f"Brain {e['brain']} ({e['name']}) at {e['at']}: {e['msg']}")
         if state.get("product"):
             st.caption(f"Product: {brains.PRODUCT_TITLES.get(state['product'], state['product'])} · "
                        f"Fix rounds used: {state.get('fix_round', 0)} · "
@@ -499,10 +501,7 @@ with tab_make:
             if state["status"] == "waiting_approval":
                 if st.button("Approve and save this product", type="primary", key="btn_approve"):
                     version_no = len(proj["versions"]) + 1
-          ctx_pkg = {"currency": currency, "business": brand, "brand": brand, "trade": state.get("trade", trade_key),
-                   "style": state.get("style", {}),
-                   "trade_label": sheets.TRADES.get(state.get("trade", trade_key), {}).get("label") or state.get("trade", trade_key).replace("_", " ").title()}
-
+                    ctx_pkg = {"currency": currency, "business": brand, "brand": brand, "trade": state.get("trade", trade_key), "style": state.get("style") or sheets.refine_style(store.last_style(proj))[0], "style_changes": state.get("style_changes", [])}
                     zip_bytes, manifest = brains.build_package(ctx_pkg, state, version_no)
                     types = sorted({c["type"] for c in plan["changes"]})
                     proj["versions"].append({
@@ -544,6 +543,11 @@ with tab_make:
                                key="dl_phone")
         st.download_button("🧪 Google test files (3 versions, zip)", google_test_zip(ss["pkg"]),
                            file_name=ss["pkg_name"] + "_google_test.zip", mime="application/zip", key="dl_gtest")
+        poster_png = brains.package_member(ss["pkg"], "12_pinterest_poster.png")
+        if poster_png:
+            st.image(poster_png, caption="Pinterest poster (preview)")
+            st.download_button("🖼️ Pinterest poster (PNG)", poster_png, file_name="pinterest_poster.png",
+                               mime="image/png", key="dl_poster")
         st.download_button("📦 Everything (zip)", ss["pkg"], file_name=ss["pkg_name"] + ".zip",
                            mime="application/zip", key="dl_zip")
         st.caption("Test the three Google files first: upload each to Google Drive and open it with Google Sheets "

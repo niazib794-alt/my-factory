@@ -215,6 +215,40 @@ def _texts(obj):
             yield from _texts(v)
 
 
+CTX_DEFAULTS = {
+    "market": "United States", "audience": "small contractors", "research_text": "", "source": "owner",
+    "shot_note": "none", "images": [], "complaints": [], "prev": None, "prev_style": None, "recent": [],
+    "results_text": "none", "owner_notes": "", "fix_notes": [], "grounding": False, "sources": [],
+    "use_web": False, "tavily_key": "", "tavily_keys": [], "research_passes": RESEARCH_DEFAULT,
+    "currency": "USD", "brand": "Gripco", "style_changes": [], "notes": [], "log": [], "keys": [],
+    "slots": [], "product": None, "product_fixed": False,
+}
+
+
+def normalize_ctx(ctx):
+    """Fill every key the brains read, so a short context from the app cannot break a run.
+    The owner's values always win; only missing keys are filled."""
+    for k, v in CTX_DEFAULTS.items():
+        if k not in ctx:
+            ctx[k] = list(v) if isinstance(v, list) else (dict(v) if isinstance(v, dict) else v)
+    ctx["trade"] = ctx.get("trade") or "plumb_elec"
+    if ctx["trade"] not in sheets.TRADES:
+        ctx["trade"] = "other"
+    ctx.setdefault("trade_label", sheets.TRADES[ctx["trade"]]["label"])
+    ctx.setdefault("business", ctx["brand"])
+    if not ctx.get("style"):
+        ctx["style"] = sheets.refine_style(None)[0]
+    return ctx
+
+
+def prev_description(ctx):
+    """The last approved listing description, or '' when there is none or the shape is unexpected."""
+    try:
+        return ctx["prev"]["brains"]["7"]["data"]["description"]
+    except Exception:
+        return ""
+
+
 def _safe(s):
     return re.sub(r"[^A-Za-z0-9_-]+", "_", str(s)).strip("_")[:60] or "file"
 
@@ -669,7 +703,7 @@ def brain7(ctx):
             f"SHEET TEXT:\n{json.dumps(ctx['out']['5'], ensure_ascii=False)[:1500]}\n\n"
             f"COLUMNS (exact): {', '.join(headers)}\nDASHBOARD ITEMS (exact): {', '.join(labels)}\n\n"
             f"LAST VERSION DESCRIPTION (write a NEW description; do not copy it):\n"
-            f"{ctx['prev']['brains']['7']['data']['description'][:3000] if ctx.get('prev') else 'none'}")
+            f"{prev_description(ctx)[:3000] or 'none'}")
 
     def check(d):
         if not isinstance(d, dict):
@@ -795,10 +829,12 @@ def _template_for(n, ctx):
 # ---------------- brain 10: mobile and layout reviewer (code)
 def mobile_check(ctx, state):
     """Build the phone file for this run and check it. Returns (rows, file bytes)."""
+    ctx = normalize_ctx(ctx)
     out = {k: v["data"] for k, v in state["brains"].items()}
     text = {"start_lines": out["5"]["start_lines"], "hints": out["5"]["hints"]}
     blob = sheets.build_workbook(state["product"], ctx["currency"], ctx["business"], "phone",
-                                 trade=ctx["trade"], style=ctx["style"], text=text, brand=ctx["brand"])
+                                 trade=ctx["trade"], style=state.get("style") or ctx["style"], text=text,
+                                 brand=ctx["brand"])
     return sheets.mobile_report(blob), blob
 
 
@@ -840,9 +876,9 @@ def brain11(ctx, state):
                    listing_probs[0] if listing_probs else "every topic is in the workbook"))
     if listing_probs:
         warn.append("listing wording needs a look")
-    prev = ctx.get("prev")
-    if prev:
-        ratio = difflib.SequenceMatcher(None, prev["brains"]["7"]["data"]["description"], listing["description"]).ratio()
+    prev_desc = prev_description(ctx)
+    if prev_desc:
+        ratio = difflib.SequenceMatcher(None, prev_desc, listing["description"]).ratio()
         checks.append(("Listing is new, not a copy of the last version", "PASS" if ratio < 0.85 else "WARNING",
                        f"similarity {ratio:.2f} (limit 0.85)"))
     for name, status, detail in sheets.palette_problems(ctx["trade"]):
@@ -892,6 +928,9 @@ def new_state(product_key):
 
 
 def run_pipeline(state, ctx, save, pins_on=True):
+    ctx = normalize_ctx(ctx)
+    state.setdefault("style", ctx["style"])
+    state.setdefault("style_changes", list(ctx.get("style_changes", [])))
     b = state["brains"]
     state["pins_on"] = pins_on
     order = [n for n in AI_ORDER if pins_on or n != 9]
@@ -962,12 +1001,24 @@ HOW_TO = """ادائیگی سے پہلے یہ مراحل کریں (صرف اپن
 """
 
 
+def package_member(zip_bytes, name):
+    """One file out of a saved package, or None."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as z:
+            return z.read(name)
+    except Exception:
+        return None
+
+
 def build_package(ctx, state, version_no):
     """Workbooks, Google test files, documents, the poster and checksums. Returns (zip bytes, manifest)."""
+    ctx = normalize_ctx(ctx)
     out = {k: v["data"] for k, v in state["brains"].items()}
     prod = state["product"]
     text = {"start_lines": out["5"]["start_lines"], "hints": out["5"]["hints"]}
-    cur, biz, brand, trade, style = ctx["currency"], ctx["business"], ctx["brand"], ctx["trade"], ctx["style"]
+    cur, biz, brand, trade = ctx["currency"], ctx["business"], ctx["brand"], ctx["trade"]
+    style = state.get("style") or ctx["style"]
+    changes = state.get("style_changes") or ctx.get("style_changes", [])
     base = f"{_safe(biz)}_{prod}_v{version_no}"
     kw = dict(trade=trade, style=style, text=text, brand=brand)
     laptop_book = sheets.build_workbook(prod, cur, biz, "laptop", **kw)
@@ -998,7 +1049,7 @@ def build_package(ctx, state, version_no):
     files["10_poster_brief.txt"] = f"Trade: {ctx['trade_label']}\nHeadline: {headline}\nBrand: {brand}\nPalette: {sheets.TRADES[trade]['palette']}"
     files["13_sheet_specification.txt"] = sheets.spec_text(prod, cur, biz)
     files["14_how_to_upload.txt"] = HOW_TO
-    files["layout_refinement.txt"] = "\n".join(ctx.get("style_changes", [])) or "no change"
+    files["layout_refinement.txt"] = "\n".join(changes) or "no change"
     manifest = {name: hashlib.sha256(d if isinstance(d, bytes) else d.encode("utf-8")).hexdigest()
                 for name, d in files.items()}
     files["MANIFEST.txt"] = "\n".join(f"{h}  {n}" for n, h in manifest.items())

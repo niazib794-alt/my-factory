@@ -23,8 +23,6 @@ SLOT_DEFS = [
     {"id": "gem3", "label": "Gemini 3", "kind": "gemini", "base": "", "default": ["Decide", "Critic"]},
     {"id": "groq", "label": "Groq 1", "kind": "openai", "base": "https://api.groq.com/openai/v1", "default": ["Listing", "Pins"]},
     {"id": "groq2", "label": "Groq 2", "kind": "openai", "base": "https://api.groq.com/openai/v1", "default": ["Research"]},
-    {"id": "mistral", "label": "Mistral 1", "kind": "openai", "base": "https://api.mistral.ai/v1", "default": ["Guide"]},
-    {"id": "mistral2", "label": "Mistral 2", "kind": "openai", "base": "https://api.mistral.ai/v1", "default": []},
     {"id": "openrouter", "label": "OpenRouter 1", "kind": "openai", "base": "https://openrouter.ai/api/v1", "default": []},
     {"id": "openrouter2", "label": "OpenRouter 2", "kind": "openai", "base": "https://openrouter.ai/api/v1", "default": []},
     {"id": "cohere", "label": "Cohere", "kind": "openai", "base": "https://api.cohere.ai/compatibility/v1", "default": ["Research"]},
@@ -38,8 +36,7 @@ SLOT_DEFS = [
 SECRET_PREFIX = {"groq": "GROQ", "mistral": "MISTRAL", "openrouter": "OPENROUTER",
                  "cus1": "CUSTOM1", "cus2": "CUSTOM2", "cus3": "CUSTOM3",
                  "cus4": "CUSTOM4", "cus5": "CUSTOM5", "cus6": "CUSTOM6"}
-MODEL_DEFAULT = {"groq": "llama-3.3-70b-versatile", "mistral": "mistral-small-latest",
-                 "openrouter": "deepseek/deepseek-chat"}
+MODEL_DEFAULT = {"groq": "llama-3.3-70b-versatile", "openrouter": "deepseek/deepseek-chat"}
 
 
 class EngineError(Exception):
@@ -138,6 +135,14 @@ def record(log, job, slot, ok, ms, note, keys):
     del log[:-500]
 
 
+DEAD = {}  # slot name -> the refusal, for keys that answered 401, 403 or 404 this session
+
+
+def revive_all():
+    """Called by the Test button: every key gets another chance after a test."""
+    DEAD.clear()
+
+
 def run_job(job, system, user, slots, log, keys, images=(), grounding=False, sources=None, rotate=0):
     """Ask the slots for this job in order. Returns (text, slot name)."""
     entries = ordered_for(job, ready_entries(slots), rotate)
@@ -154,6 +159,8 @@ def run_job(job, system, user, slots, log, keys, images=(), grounding=False, sou
             return text, e["name"]
         except Exception as ex:
             msg = scrub(ex, keys)
+            if re.search(r"HTTP (401|403|404)", msg):
+                DEAD[e["name"]] = msg[:120]
             record(log, job, e["name"], False, (time.time() - t0) * 1000, msg, keys)
             errs.append(f"{e['name']}: {msg[:140]}")
     if images:
@@ -253,7 +260,6 @@ def score_table(log):
 SLOT_SECRETS = {
     "gem1": ["GEMINI_KEY_1"], "gem2": ["GEMINI_KEY_2"], "gem3": ["GEMINI_KEY_3"],
     "groq": ["GROQ_KEY", "GROQ_KEY_1"], "groq2": ["GROQ_KEY_2", "GROQ_2_KEY"],
-    "mistral": ["MISTRAL_KEY", "MISTRAL_KEY_1"], "mistral2": ["MISTRAL_KEY_2", "MISTRAL_2_KEY"],
     "openrouter": ["OPENROUTER_KEY", "OPENROUTER_KEY_1"], "openrouter2": ["OPENROUTER_KEY_2", "OPENROUTER_2_KEY"],
     "cohere": ["COHERE_KEY", "COHERE_API_KEY", "COHERE_KEY_1"],
 }
@@ -261,12 +267,11 @@ SLOT_SECRETS.update({f"cus{n}": [f"CUSTOM{n}_KEY"] for n in range(1, 7)})
 SLOT_MODEL_SECRETS = {
     "gem1": ["GEMINI_MODEL"], "gem2": ["GEMINI_MODEL"], "gem3": ["GEMINI_MODEL"],
     "groq": ["GROQ_MODEL"], "groq2": ["GROQ_MODEL_2", "GROQ_MODEL"],
-    "mistral": ["MISTRAL_MODEL"], "mistral2": ["MISTRAL_MODEL_2"],
     "openrouter": ["OPENROUTER_MODEL"], "openrouter2": ["OPENROUTER_MODEL_2"],
     "cohere": ["COHERE_MODEL"],
 }
 SLOT_MODEL_SECRETS.update({f"cus{n}": [f"CUSTOM{n}_MODEL"] for n in range(1, 7)})
-SLOT_BASE_SECRETS = {"cohere": ["COHERE_BASE"], "mistral": ["MISTRAL_BASE"]}
+SLOT_BASE_SECRETS = {"cohere": ["COHERE_BASE"], }
 SLOT_BASE_SECRETS.update({f"cus{n}": [f"CUSTOM{n}_BASE"] for n in range(1, 7)})
 MODEL_DEFAULT.update({"groq2": "llama-3.3-70b-versatile", "cohere": "command-r-plus-08-2024"})
 
@@ -294,8 +299,7 @@ def assign_keys(values):
         out[f"gem{i}"] = k
     customs = {n: str(values.get(f"CUSTOM{n}_NAME", "")).lower() for n in range(1, 7)}
     custom_keys = {n: str(values.get(f"CUSTOM{n}_KEY", "")).strip() for n in range(1, 7)}
-    for sid, token, word in (("groq", "GROQ", "groq"), ("mistral", "MISTRAL", "mistral"),
-                             ("openrouter", "OPENROUTER", "openrouter")):
+    for sid, token, word in (("groq", "GROQ", "groq"), ("openrouter", "OPENROUTER", "openrouter")):
         keys = pool_secrets(values, token)
         if not keys:
             keys = [custom_keys[n] for n in range(1, 7) if word in customs[n] and custom_keys[n]]

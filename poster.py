@@ -257,4 +257,3 @@ def make_poster(trade_key, module, trade_label, brand, primary, accent, laptop_p
     out = io.BytesIO()
     im.save(out, "PNG")
     return out.getvalue(), status
-          
