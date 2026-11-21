@@ -8,6 +8,8 @@ No Streamlit code here, so this file can be tested on its own.
 import io
 import re
 
+import config
+
 from openpyxl import Workbook
 from openpyxl.formatting.rule import CellIsRule, FormulaRule
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Protection, Side
@@ -152,7 +154,7 @@ PROTECT_ON = True
 VALIDATIONS_ON = True
 CONDITIONAL_ON = True
 OVERRIDE_TEXT = {}  # brain text: start lines and tab hints
-BRAND_DEFAULT = "Gripco"
+BRAND_DEFAULT = config.BRAND_NAME
 FORMULA_FILL = "E2E8F0"  # grey: automatic cells in every file
 TRADES = {  # header colour (primary), accent, example job, pin palette wording
     "plumb_elec": {"label": "Plumbers & Electricians", "primary": "1E3A8A", "accent": "F59E0B",
@@ -261,7 +263,8 @@ def _data_sheet(wb, name, cur, layout="laptop"):
         h.border = _box()
         h.protection = Protection(locked=True)
         ws.column_dimensions[get_column_letter(ci)].width = (
-            max(STYLE["phone_min_width"], _width(spec[2], layout), _word_width(spec[0]))
+            max(STYLE["phone_min_width"], _width(spec[2], layout), _word_width(spec[0]),
+                16 if spec[1] == "date" else 0)
             if layout == "phone" else _width(spec[2], layout))
     ws.row_dimensions[3].height = 44
     if layout == "phone":

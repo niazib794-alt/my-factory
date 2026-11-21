@@ -9,12 +9,14 @@ import zipfile
 
 import streamlit as st
 
+import config
+
 import brains
 import engine
 import sheets
 import store
 
-st.set_page_config(page_title="Gripco Factory", page_icon="🧰", layout="centered")
+st.set_page_config(page_title=config.APP_TITLE, page_icon="🧰", layout="centered")
 st.markdown("""
 <style>
 .block-container {padding-top: 1.2rem; padding-bottom: 3rem; max-width: 1000px;}
@@ -295,7 +297,7 @@ def cb_restore():
 # ---------------- header
 answered = len([c for c in proj.get("complaint_log", []) if c.get("status") == "answered"])
 st.markdown(
-    f"""<div class="bf-hero"><h2>🧰 Gripco Factory · Business Factory 5</h2>
+    f"""<div class="bf-hero"><h2>🧰 {config.APP_TITLE} · Business Factory 5</h2>
     <p>Trade spreadsheets with research, decision, two workbooks (laptop and phone), listing, guide, pins,
     checks and a ZIP. You approve, then upload yourself. No sales or income is promised.</p></div>""",
     unsafe_allow_html=True)
@@ -499,9 +501,12 @@ with tab_make:
                     st.json(state["brains"][n]["data"], expanded=False)
 
             if state["status"] == "waiting_approval":
+                phone_up = st.file_uploader("Optional: a screenshot of your Google Sheet on a phone (PNG or JPG). "
+                                            "Leave it empty and the poster uses a labelled SAMPLE preview.",
+                                            type=["png", "jpg", "jpeg"], key="phone_shot_up")
                 if st.button("Approve and save this product", type="primary", key="btn_approve"):
                     version_no = len(proj["versions"]) + 1
-                    ctx_pkg = {"currency": currency, "business": brand, "brand": brand, "trade": state.get("trade", trade_key), "style": state.get("style") or sheets.refine_style(store.last_style(proj))[0], "style_changes": state.get("style_changes", [])}
+                    ctx_pkg = {"currency": currency, "business": brand, "brand": brand, "trade": state.get("trade", trade_key), "style": state.get("style") or sheets.refine_style(store.last_style(proj))[0], "style_changes": state.get("style_changes", []), "phone_shot": (phone_up.getvalue() if phone_up else None)}
                     zip_bytes, manifest = brains.build_package(ctx_pkg, state, version_no)
                     types = sorted({c["type"] for c in plan["changes"]})
                     proj["versions"].append({

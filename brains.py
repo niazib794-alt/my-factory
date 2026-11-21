@@ -21,6 +21,7 @@ import re
 import zipfile
 from datetime import datetime
 
+import config
 import engine
 import poster
 import sheets
@@ -220,7 +221,7 @@ CTX_DEFAULTS = {
     "shot_note": "none", "images": [], "complaints": [], "prev": None, "prev_style": None, "recent": [],
     "results_text": "none", "owner_notes": "", "fix_notes": [], "grounding": False, "sources": [],
     "use_web": False, "tavily_key": "", "tavily_keys": [], "research_passes": RESEARCH_DEFAULT,
-    "currency": "USD", "brand": "Gripco", "style_changes": [], "notes": [], "log": [], "keys": [],
+    "currency": "USD", "brand": config.BRAND_NAME, "style_changes": [], "notes": [], "log": [], "keys": [],
     "slots": [], "product": None, "product_fixed": False,
 }
 
@@ -1033,13 +1034,20 @@ def build_package(ctx, state, version_no):
     }
     for fname, n, title in DOCS:
         files[fname] = f"{title}\n\n" + json.dumps(out[n], ensure_ascii=False, indent=2)
-    laptop_png = poster.render_workbook_screen(poster.add_sample_rows(laptop_book, prod, sheets))
-    phone_png = poster.render_workbook_screen(poster.add_sample_rows(phone_book, prod, sheets))
+    laptop_png = poster.screen_or_table(poster.add_sample_rows(laptop_book, prod, sheets), prod, "laptop")
+    uploaded = ctx.get("phone_shot")
+    phone_sample = not uploaded
+    if uploaded:
+        phone_png = uploaded
+    else:
+        phone_png = poster.screen_or_table(poster.add_sample_rows(phone_book, prod, sheets, layout="phone"), prod, "phone")
     pdata = out.get("9", {}).get("poster") or {}
     headline = pdata.get("headline") or poster.HEADLINES.get(trade, poster.HEADLINES["other"])
     png, status = poster.make_poster(trade, prod, ctx["trade_label"], brand,
                                      sheets.TRADES[trade]["primary"], sheets.TRADES[trade]["accent"],
-                                     laptop_png, phone_png)
+                                     laptop_png, phone_png, laptop_sample=True, phone_sample=phone_sample,
+                                     headline=headline, tagline=pdata.get("tagline"),
+                                     badges=pdata.get("badges"), cta=pdata.get("cta"))
     files["12_pinterest_poster.png"] = png
     files["12b_poster_status.txt"] = (f"Headline: {headline}\nScreens: {status}\n"
                                       "Text is drawn by code. Screens are the real workbook; sample rows are marked SAMPLE.")
