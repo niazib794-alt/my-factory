@@ -150,6 +150,7 @@ RED_FILL = PatternFill(fill_type="solid", start_color="FEE2E2", end_color="FEE2E
 RED_FONT = Font(name=FONT, color="991B1B", bold=True)
 AMBER_FILL = PatternFill(fill_type="solid", start_color="FEF3C7", end_color="FEF3C7")
 AMBER_FONT = Font(name=FONT, color="92400E")
+MARKUP_FILL = PatternFill(fill_type="solid", start_color="FDBA74", end_color="FDBA74")
 PROTECT_ON = True
 VALIDATIONS_ON = True
 CONDITIONAL_ON = True
@@ -235,7 +236,9 @@ def _rules(name):
                  FormulaRule(formula=[f'$J{FIRST}="Overdue"'], fill=RED_FILL, font=RED_FONT))]
     if name == EXTRA:
         return [(f"N{FIRST}:N{LAST}",
-                 FormulaRule(formula=[f'AND($M{FIRST}="Approved",$N{FIRST}="")'], fill=AMBER_FILL, font=AMBER_FONT))]
+                 FormulaRule(formula=[f'AND($M{FIRST}="Approved",$N{FIRST}="")'], fill=AMBER_FILL, font=AMBER_FONT)),
+                (f"K{FIRST}:K{LAST}",
+                 FormulaRule(formula=[f'AND($B{FIRST}<>"",$K{FIRST}="")'], fill=MARKUP_FILL))]
     return []
 
 
@@ -264,7 +267,7 @@ def _data_sheet(wb, name, cur, layout="laptop"):
         h.protection = Protection(locked=True)
         ws.column_dimensions[get_column_letter(ci)].width = (
             max(STYLE["phone_min_width"], _width(spec[2], layout), _word_width(spec[0]),
-                16 if spec[1] == "date" else 0)
+                16 if spec[1] == "date" else 0, 17 if spec[1] in ("money", "c_money") else 0)
             if layout == "phone" else _width(spec[2], layout))
     ws.row_dimensions[3].height = 44
     if layout == "phone":
@@ -314,7 +317,7 @@ def _data_sheet(wb, name, cur, layout="laptop"):
     return ws
 
 
-def _settings_sheet(wb, cur, business):
+def _settings_sheet(wb, cur, business, module=""):
     ws = wb.create_sheet(SET)
     ws.merge_cells("A1:C1")
     ws["A1"] = f"SETTINGS • {BRAND} • change the yellow cells only"
@@ -338,6 +341,9 @@ def _settings_sheet(wb, cur, business):
         ("Currency", cur, "c_text", "Set when this file was built. To change it, build the file again."),
         ("Trade", TRADES[TRADE]["label"], "text", "Your trade. Pick one from the list. It sets the header colours."),
     ]
+    if module == "change_orders":
+        rows = [(a, b_, c, "Not used in this workbook. It belongs to the Job Costing product.") if i < 3 else (a, b_, c, d)
+                for i, (a, b_, c, d) in enumerate(rows)]
     for i, (label, value, kind, note) in enumerate(rows, 4):
         a = ws.cell(row=i, column=1, value=label)
         a.font = _font(True)
@@ -382,14 +388,15 @@ def dashboard_blocks(module):
         ]))
     if module in ("change_orders", "bundle"):
         m, n, l, bl = _rng(EXTRA, "M"), _rng(EXTRA, "N"), _rng(EXTRA, "L"), _rng(EXTRA, "P")
+        b = _rng(EXTRA, "B")
         blocks.append(("EXTRA WORK", [
             ("Requests logged", f"=COUNTA({_rng(EXTRA, 'B')})", "c_int", ""),
-            ("Waiting for client", f'=COUNTIFS({m},"Waiting for client")', "c_int", "Follow up on these"),
+            ("Waiting for client", f'=COUNTIFS({m},"Waiting for client",{b},"<>")', "c_int", "Follow up on these"),
             ("Total proposed charges", f"=SUM({l})", "c_money", ""),
-            ("Approved amount", f'=SUMIFS({n},{m},"Approved")', "c_money", ""),
-            ("Approved, not billed yet", f'=SUMIFS({n},{m},"Approved",{bl},"Not billed")', "c_money",
+            ("Approved amount", f'=SUMIFS({n},{m},"Approved",{b},"<>")', "c_money", ""),
+            ("Approved, not billed yet", f'=SUMIFS({n},{m},"Approved",{bl},"<>Billed",{b},"<>")', "c_money",
              "Invoice these now"),
-            ("Approved but no amount typed", f'=COUNTIFS({m},"Approved",{n},"")', "c_int", "Should be 0"),
+            ("Approved but no amount typed", f'=COUNTIFS({m},"Approved",{n},"",{b},"<>")', "c_int", "Should be 0"),
         ]))
     if module in ("receivables", "bundle"):
         g, e, f_, j = _rng(INV, "G"), _rng(INV, "E"), _rng(INV, "F"), _rng(INV, "J")
@@ -466,8 +473,10 @@ def _start_sheet(ws, module, cur, business, layout="laptop"):
         ("calc", "Grey cell = automatic. Do not type in grey cells."),
         ("text", LAYOUT_NOTE[layout]),
         ("head", "Steps"),
-        ("text", "1. Open Settings. Check the yellow values: business name, overhead method, default "
-                 "overhead % and target margin."),
+        ("text", ("1. Open Settings and type your business name. It shows on START HERE and in the Dashboard title."
+                  if module == "change_orders" else
+                  "1. Open Settings. Check the yellow values: business name, overhead method, default "
+                  "overhead % and target margin.")),
         ("text", "2. Type one row per item in the yellow cells. Client / Job is required on every row."),
         ("text", dash_tip(module)),
         ("head", "Limits and protection"),
@@ -546,7 +555,7 @@ def build_workbook(module, currency="USD", business=None, layout="laptop", theme
     start = wb.active
     start.title = START
     _start_sheet(start, module, currency, business, layout)
-    _settings_sheet(wb, currency, business)
+    _settings_sheet(wb, currency, business, module)
     for name in PRODUCT_SHEETS[module]:
         _data_sheet(wb, name, currency, layout)
     _dashboard_sheet(wb, module, currency, business, layout)
