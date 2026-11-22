@@ -116,7 +116,7 @@ FACTS = {
                         "accounting advice."),
         "hook": "Log each extra-work request and see its client decision, proposed charge and billing status in one place.",
         "how_to": ["Open the file in Google Sheets or Excel.",
-                   "Open Settings and set your business name and currency.",
+                   "Open Settings and type your business name.",
                    "Type one row per extra-work request in the yellow cells, then open the Dashboard to check approved work."],
         "included": ["Extra work log for each request", "Client decision list with pending, approved and rejected",
                      "Proposed charge with your markup", "Dashboard with approved work not billed yet",
@@ -994,7 +994,7 @@ DOCS = [
 ]
 HOW_TO = """ادائیگی سے پہلے یہ مراحل کریں (صرف اپنے لیے)
 1. ZIP کھولیں۔ لیپ ٹاپ فائل کمپیوٹر کے لیے، فون فائل فون کے لیے ہے۔
-2. google_test فولڈر کی تین فائلیں گوگل ڈرائیو پر اپلوڈ کر کے Google Sheets میں کھولیں: full، plain، no_protection۔ جو ٹھیک کھلے وہی اصل فائل بنے گی۔
+2. google_test فولڈر کی دو فائلیں گوگل ڈرائیو پر اپلوڈ کر کے Google Sheets میں کھولیں: plain، no_protection۔ جو ٹھیک کھلے وہی اصل فائل بنے گی۔
 3. Payhip پر نیا ڈیجیٹل پروڈکٹ بنائیں، xlsx فائل اپلوڈ کریں، لسٹنگ (07) چسپاں کریں، قیمت فیصلے (06) کے مطابق اور ملک کی کرنسی کے ساتھ رکھیں۔
 4. پوسٹر (12_pinterest_poster.png) اور پن (09) Pinterest پر خود پوسٹ کریں۔
 5. گیٹ کی رپورٹ (12_quality_gate.txt) اور فون کی جانچ (11_mobile_check.txt) دیکھیں، پھر اپلوڈ کریں۔
@@ -1027,7 +1027,6 @@ def build_package(ctx, state, version_no):
     files = {
         f"{base}_laptop.xlsx": laptop_book,
         f"{base}_phone.xlsx": phone_book,
-        f"google_test/{base}_full.xlsx": laptop_book,
         f"google_test/{base}_plain.xlsx": sheets.build_workbook(prod, cur, biz, "laptop", protect=False,
                                                                validations=False, conditional=False, **kw),
         f"google_test/{base}_no_protection.xlsx": sheets.build_workbook(prod, cur, biz, "laptop", protect=False, **kw),
