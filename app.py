@@ -65,15 +65,6 @@ def member(zip_bytes, suffix):
     return None, None
 
 
-def google_test_zip(zip_bytes):
-    buf = io.BytesIO()
-    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as src, zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as dst:
-        for n in src.namelist():
-            if n.startswith("google_test/"):
-                dst.writestr(n.split("/", 1)[1], src.read(n))
-    return buf.getvalue()
-
-
 def models_ready(slots, tav_keys):
     """The product opens when at least one AI key and, if Tavily keys are set, one Tavily key have passed
     the test this session. Keys that failed are named as warnings; the run uses the keys that work."""
@@ -507,7 +498,7 @@ with tab_make:
                 if st.button("Approve and save this product", type="primary", key="btn_approve"):
                     version_no = len(proj["versions"]) + 1
                     ctx_pkg = {"currency": currency, "business": brand, "brand": brand, "trade": state.get("trade", trade_key), "style": state.get("style") or sheets.refine_style(store.last_style(proj))[0], "style_changes": state.get("style_changes", []), "phone_shot": (phone_up.getvalue() if phone_up else None)}
-                    zip_bytes, manifest = brains.build_package(ctx_pkg, state, version_no)
+                    zip_bytes, owner_bytes, manifest = brains.build_package(ctx_pkg, state, version_no)
                     types = sorted({c["type"] for c in plan["changes"]})
                     proj["versions"].append({
                         "v": version_no, "date": store.today(), "at": store.now(), "product": state["product"],
@@ -523,6 +514,7 @@ with tab_make:
                     store.record_daily({"date": store.today(), "project": proj["id"], "v": version_no,
                                         "product": state["product"], "types": types, "approved": True})
                     ss["pkg"], ss["pkg_name"] = zip_bytes, f"{store.today()}_{state['product']}_v{version_no}"
+                    ss["pkg_owner"] = owner_bytes
                     ss["flash"] = ("success", f"Version {version_no} approved. Backup saved: {backup}")
                     st.rerun()
             notes_back = st.text_input("Send back with notes (the brains redo the plan and the text)",
@@ -537,26 +529,20 @@ with tab_make:
                 st.info("Sent back. Press 'Continue from where it stopped'.")
 
     if ss.get("pkg") and ss.get("pkg_name"):
-        st.markdown("#### Downloads")
-        name, data = member(ss["pkg"], "_laptop.xlsx")
-        if data:
-            st.download_button("💻 Laptop file (.xlsx)", data, file_name=name.split("/")[-1], mime=XLSX_MIME,
-                               key="dl_laptop")
-        name, data = member(ss["pkg"], "_phone.xlsx")
-        if data:
-            st.download_button("📱 Phone file (.xlsx)", data, file_name=name.split("/")[-1], mime=XLSX_MIME,
-                               key="dl_phone")
-        st.download_button("🧪 Google test files (3 versions, zip)", google_test_zip(ss["pkg"]),
-                           file_name=ss["pkg_name"] + "_google_test.zip", mime="application/zip", key="dl_gtest")
-        poster_png = brains.package_member(ss["pkg"], "12_pinterest_poster.png")
-        if poster_png:
-            st.image(poster_png, caption="Pinterest poster (preview)")
-            st.download_button("🖼️ Pinterest poster (PNG)", poster_png, file_name="pinterest_poster.png",
-                               mime="image/png", key="dl_poster")
-        st.download_button("📦 Everything (zip)", ss["pkg"], file_name=ss["pkg_name"] + ".zip",
+        st.markdown("#### Upload package (buyer ZIP)")
+        st.download_button("📦 Buyer ZIP (upload this)", ss["pkg"], file_name=ss["pkg_name"] + "_BUYER.zip",
                            mime="application/zip", key="dl_zip")
-        st.caption("Test the three Google files first: upload each to Google Drive and open it with Google Sheets "
-                   "(or Excel). Tell me which one opens and which one hangs.")
+        st.caption("Four workbooks (Google Sheets and Excel, each locked or unlocked) and the how-to file.")
+        if ss.get("pkg_owner"):
+            st.markdown("#### Owner files (not for upload)")
+            st.download_button("🗂️ Owner files (zip)", ss["pkg_owner"], file_name=ss["pkg_name"] + "_OWNER.zip",
+                               mime="application/zip", key="dl_owner")
+            poster_png = brains.package_member(ss["pkg_owner"], "OWNER_pinterest_poster.png")
+            if poster_png:
+                st.image(poster_png, caption="Pinterest poster (preview)")
+                st.download_button("🖼️ Pinterest poster (PNG)", poster_png, file_name="pinterest_poster.png",
+                                   mime="image/png", key="dl_poster")
+
 
     if proj["versions"]:
         st.markdown("#### Approved versions of this project")
