@@ -143,7 +143,7 @@ FACTS = {
                         "layout and a phone layout. You type your own numbers. It gives no legal, tax or accounting advice."),
         "hook": "See every open balance, overdue invoice and follow-up in one workbook.",
         "how_to": ["Open the file in Google Sheets or Excel.",
-                   "Open Settings and set your business name and currency.",
+                   "Open Settings and type your business name and follow-up reminder days.",
                    "Type one row per invoice in the yellow cells, then open the Dashboard to see overdue invoices and follow-ups."],
         "included": ["Invoice log with amount, payments and due date", "Balance and payment status for each invoice",
                      "Aging buckets from 1-30 to 90+ days", "Dashboard with overdue invoices and follow-ups",
@@ -1033,23 +1033,27 @@ def build_package(ctx, state, version_no):
     }
     for fname, n, title in DOCS:
         files[fname] = f"{title}\n\n" + json.dumps(out[n], ensure_ascii=False, indent=2)
-    laptop_png = poster.screen_or_table(poster.add_sample_rows(laptop_book, prod, sheets), prod, "laptop")
-    uploaded = ctx.get("phone_shot")
-    phone_sample = not uploaded
-    if uploaded:
-        phone_png = uploaded
-    else:
-        phone_png = poster.screen_or_table(poster.add_sample_rows(phone_book, prod, sheets, layout="phone"), prod, "phone")
-    pdata = out.get("9", {}).get("poster") or {}
-    headline = pdata.get("headline") or poster.HEADLINES.get(trade, poster.HEADLINES["other"])
-    png, status = poster.make_poster(trade, prod, ctx["trade_label"], brand,
-                                     sheets.TRADES[trade]["primary"], sheets.TRADES[trade]["accent"],
-                                     laptop_png, phone_png, laptop_sample=True, phone_sample=phone_sample,
-                                     headline=headline, tagline=pdata.get("tagline"),
-                                     badges=pdata.get("badges"), cta=pdata.get("cta"))
-    files["12_pinterest_poster.png"] = png
-    files["12b_poster_status.txt"] = (f"Headline: {headline}\nScreens: {status}\n"
-                                      "Text is drawn by code. Screens are the real workbook; sample rows are marked SAMPLE.")
+    try:
+        laptop_png = poster.screen_or_table(poster.add_sample_rows(laptop_book, prod, sheets), prod, "laptop")
+        uploaded = ctx.get("phone_shot")
+        phone_sample = not uploaded
+        if uploaded:
+            phone_png = uploaded
+        else:
+            phone_png = poster.screen_or_table(poster.add_sample_rows(phone_book, prod, sheets, layout="phone"), prod, "phone")
+        pdata = out.get("9", {}).get("poster") or {}
+        headline = pdata.get("headline") or poster.HEADLINES.get(trade, poster.HEADLINES["other"])
+        png, status = poster.make_poster(trade, prod, ctx["trade_label"], brand,
+                                         sheets.TRADES[trade]["primary"], sheets.TRADES[trade]["accent"],
+                                         laptop_png, phone_png, laptop_sample=True, phone_sample=phone_sample,
+                                         headline=headline, tagline=pdata.get("tagline"),
+                                         badges=pdata.get("badges"), cta=pdata.get("cta"))
+        files["12_pinterest_poster.png"] = png
+        files["12b_poster_status.txt"] = (f"Headline: {headline}\nScreens: {status}\n"
+                                          "Text is drawn by code. Screens are the real workbook; sample rows are marked SAMPLE.")
+    except Exception as e:  # the poster is optional; the workbooks are the product
+        files["12b_poster_status.txt"] = (f"Poster not made: {str(e)[:200]}. "
+                                          "The workbooks are complete without it.")
     rows, _ = mobile_check(ctx, state)
     files["11_mobile_check.txt"] = "\n".join(f"{n}: {s}. {d}" for n, s, d in rows)
     files["12_quality_gate.txt"] = "\n".join(f"{n}: {s}. {d}" for n, s, d in state["checks"])
