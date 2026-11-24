@@ -106,14 +106,14 @@ COLUMNS = {
         ("Due date", "date", 13, None, None),
         ("Invoice amount (required)", "money", 15, None, None),
         ("Amount paid", "money", 14, None, None),
-        ("Balance due", "c_money", 14, '=IF(B{r}="","",E{r}-F{r})', None),
+        ("Balance due", "c_money", 14, '=IF(OR(B{r}="",E{r}=""),"",E{r}-F{r})', None),
         ("Days past due", "c_int", 11, '=IF(OR(B{r}="",D{r}=""),"",IF(G{r}<=0,0,MAX(0,TODAY()-D{r})))', None),
         ("Aging", "c_text", 14,
-         '=IF(B{r}="","",IF(G{r}<=0,"Paid",IF(H{r}="","No due date",IF(H{r}=0,"Not yet due",'
-         'IF(H{r}<=30,"1-30 days",IF(H{r}<=60,"31-60 days",IF(H{r}<=90,"61-90 days","90+ days")))))))', None),
+         '=IF(B{r}="","",IF(E{r}="","Check amount",IF(G{r}<=0,"Paid",IF(H{r}="","No due date",IF(H{r}=0,"Not yet due",'
+         'IF(H{r}<=30,"1-30 days",IF(H{r}<=60,"31-60 days",IF(H{r}<=90,"61-90 days","90+ days"))))))))', None),
         ("Status", "c_text", 13,
-         '=IF(B{r}="","",IF(G{r}<=0,"Paid",IF(AND(ISNUMBER(H{r}),H{r}>0),"Overdue",'
-         'IF(F{r}>0,"Partly paid","Open"))))', None),
+         '=IF(B{r}="","",IF(E{r}="","Check amount",IF(G{r}<=0,"Paid",IF(AND(ISNUMBER(H{r}),H{r}>0),"Overdue",'
+         'IF(F{r}>0,"Partly paid","Open")))))', None),
         ("Last follow-up", "date", 14, None, None),
         ("Next follow-up", "date", 14, None, None),
         ("Contact method", "text", 14, None, ["Phone", "WhatsApp", "Email", "Visit", "Other"]),
@@ -267,7 +267,7 @@ def _data_sheet(wb, name, cur, layout="laptop"):
         h.protection = Protection(locked=True)
         ws.column_dimensions[get_column_letter(ci)].width = (
             max(STYLE["phone_min_width"], _width(spec[2], layout), _word_width(spec[0]),
-                16 if spec[1] == "date" else 0, 17 if spec[1] in ("money", "c_money") else 0)
+                16 if spec[1] == "date" else 0, 17 if spec[1] in ("money", "c_money") or spec[0] in ("Aging", "Status") else 0)
             if layout == "phone" else _width(spec[2], layout))
     ws.row_dimensions[3].height = 44
     if layout == "phone":
@@ -285,6 +285,20 @@ def _data_sheet(wb, name, cur, layout="laptop"):
             dv = DataValidation(type="list", formula1='"' + ",".join(spec[4]) + '"', allow_blank=True)
             dv.error = "Choose a value from the list."
             dv.errorTitle = "Not in the list"
+            ws.add_data_validation(dv)
+            dv.add(f"{col}{FIRST}:{col}{LAST}")
+        elif spec[1] == "money":
+            dv = DataValidation(type="decimal", operator="greaterThanOrEqual", formula1="0", allow_blank=True)
+            dv.error = "Type an amount of 0 or more, for example 350 or 1250.50."
+            dv.errorTitle = "Amount"
+            dv.showErrorMessage = True
+            ws.add_data_validation(dv)
+            dv.add(f"{col}{FIRST}:{col}{LAST}")
+        elif spec[1] == "date":
+            dv = DataValidation(type="date", operator="between", formula1="36526", formula2="73050", allow_blank=True)
+            dv.error = "Type a date, for example 2026-11-24."
+            dv.errorTitle = "Date"
+            dv.showErrorMessage = True
             ws.add_data_validation(dv)
             dv.add(f"{col}{FIRST}:{col}{LAST}")
         elif spec[1] == "pct":
@@ -341,6 +355,14 @@ def _settings_sheet(wb, cur, business, module=""):
         ("Currency", cur, "c_text", "Set when this file was built. To change it, build the file again."),
         ("Trade", TRADES[TRADE]["label"], "text", "Your trade. Pick one from the list. It sets the header colours."),
     ]
+    if module == "receivables":
+        rows = [
+            ("Follow-up reminder (days)", 7, "text",
+             "Dashboard counts Next follow-up dates within this many days, and any that are already late."),
+            ("Your business name", business, "text", "Shown on START HERE and in the Dashboard title."),
+            ("Currency", cur, "c_text", "Set when this file was built. To change it, build the file again."),
+            ("Trade", TRADES[TRADE]["label"], "text", "Your trade. Pick one from the list. It sets the header colours."),
+        ]
     if module == "change_orders":
         rows = [(a, b_, c, "Not used in this workbook. It belongs to the Job Costing product.") if i < 3 else (a, b_, c, d)
                 for i, (a, b_, c, d) in enumerate(rows)]
@@ -356,13 +378,22 @@ def _settings_sheet(wb, cur, business, module=""):
         c.border = _box()
         c.alignment = Alignment(wrap_text=True, vertical="center")
         ws.row_dimensions[i].height = 30
+    trade_row = 4 + [r_[0] for r_ in rows].index("Trade")
     if VALIDATIONS_ON:
-        dv = DataValidation(type="list", formula1='"Direct cost,Quote"', allow_blank=False)
-        ws.add_data_validation(dv)
-        dv.add("B4")
+        if module == "receivables":
+            dvr = DataValidation(type="whole", operator="between", formula1="0", formula2="365", allow_blank=False)
+            dvr.error = "Type a whole number of days from 0 to 365."
+            dvr.errorTitle = "Reminder days"
+            dvr.showErrorMessage = True
+            ws.add_data_validation(dvr)
+            dvr.add("B4")
+        else:
+            dv = DataValidation(type="list", formula1='"Direct cost,Quote"', allow_blank=False)
+            ws.add_data_validation(dv)
+            dv.add("B4")
         dvt = DataValidation(type="list", formula1='"' + ",".join(TRADE_LABELS) + '"', allow_blank=False)
         ws.add_data_validation(dvt)
-        dvt.add("B9")
+        dvt.add(f"B{trade_row}")
     ws.column_dimensions["A"].width = 26
     ws.column_dimensions["B"].width = 22
     ws.column_dimensions["C"].width = 72
@@ -405,15 +436,20 @@ def dashboard_blocks(module):
             ("Invoices logged", f"=COUNTA({_rng(INV, 'B')})", "c_int", ""),
             ("Total invoiced", f"=SUM({e})", "c_money", ""),
             ("Total paid", f"=SUM({f_})", "c_money", ""),
-            ("Outstanding balance", f"=SUM({g})", "c_money", ""),
+            ("Outstanding balance", f'=SUMIF({g},">0")', "c_money", "Owed to you. Overpayments are shown below as credit."),
             ("Overdue balance", f'=SUMIFS({g},{j},"Overdue")', "c_money", ""),
             ("Overdue invoices", f'=COUNTIFS({j},"Overdue")', "c_int", ""),
             ("Aging: 1-30 days", f'=SUMIFS({g},{i_},"1-30 days")', "c_money", ""),
             ("Aging: 31-60 days", f'=SUMIFS({g},{i_},"31-60 days")', "c_money", ""),
             ("Aging: 61-90 days", f'=SUMIFS({g},{i_},"61-90 days")', "c_money", ""),
             ("Aging: 90+ days", f'=SUMIFS({g},{i_},"90+ days")', "c_money", ""),
-            ("Follow-ups due now or late", f'=COUNTIFS({ll},"<="&TODAY(),{g},">0")', "c_int",
-             "Contact these clients today"),
+            ("Aging: not yet due", f'=SUMIFS({g},{i_},"Not yet due")', "c_money", "Due date is today or later."),
+            ("Aging: no due date", f'=SUMIFS({g},{i_},"No due date")', "c_money", "Invoices with no Due date typed."),
+            ("Credit (paid more than invoiced)", f'=SUMIF({g},"<0")', "c_money", "Shown as a negative number. Not counted as owed."),
+            (("Follow-ups due within reminder days or late", f'=COUNTIFS({ll},"<="&(TODAY()+Settings!$B$4),{g},">0")', "c_int",
+              "Contact these clients today or this week.") if module == "receivables" else
+             ("Follow-ups due now or late", f'=COUNTIFS({ll},"<="&TODAY(),{g},">0")', "c_int",
+              "Contact these clients today.")),
         ]))
     return blocks
 
@@ -421,12 +457,12 @@ def dashboard_blocks(module):
 def _dashboard_sheet(wb, module, cur, business, layout="laptop"):
     ws = wb.create_sheet(DASH)
     ws.merge_cells("A1:C1")
-    ws["A1"] = f"DASHBOARD • {BRAND} • automatic, do not type here"
+    ws["A1"] = f'={BIZ_REF}&" • DASHBOARD • automatic, do not type here"'
     ws["A1"].font = _font(True, 13, "FFFFFF")
     ws["A1"].fill = _fill(NAVY)
     ws.row_dimensions[1].height = 30
     ws.column_dimensions["A"].width = _width(40, layout)
-    ws.column_dimensions["B"].width = 22
+    ws.column_dimensions["B"].width = 26 if layout == "phone" else 22
     ws.column_dimensions["C"].width = 44
     row = 3
     for title, items in dashboard_blocks(module):
@@ -446,6 +482,14 @@ def _dashboard_sheet(wb, module, cur, business, layout="laptop"):
             n.border = _box()
             row += 1
         row += 1
+    if layout == "phone":
+        for rr in range(3, row):
+            for cc in (1, 2):
+                cell = ws.cell(row=rr, column=cc)
+                if cell.value is not None:
+                    f0 = cell.font
+                    colour = f0.color.rgb[-6:] if (f0.color is not None and isinstance(f0.color.rgb, str)) else "0F172A"
+                    cell.font = _font(bool(f0.b), 14 if cc == 2 else 13, colour, bool(f0.i))
     if module in ("job_costing", "bundle"):
         from openpyxl.chart import BarChart, Reference
         chart = BarChart()
@@ -463,7 +507,7 @@ def _start_sheet(ws, module, cur, business, layout="laptop"):
     ws.sheet_view.showGridLines = False
     ws.column_dimensions["A"].width = 105
     rows = [
-        ("title", f"START HERE • {BRAND}"),
+        ("title", f'={BIZ_REF}&" • START HERE"'),
         ("head", PRODUCT_NAMES[module]),
         ("text", f"Trade: {TRADES[TRADE]['label']}. Example job: {TRADES[TRADE]['example']}."),
         ("text", "Download this file, upload it to Google Drive, open it in Google Sheets (or Excel), "
@@ -475,13 +519,20 @@ def _start_sheet(ws, module, cur, business, layout="laptop"):
         ("head", "Steps"),
         ("text", ("1. Open Settings and type your business name. It shows on START HERE and in the Dashboard title."
                   if module == "change_orders" else
+                  "1. Open Settings. Check the yellow values: business name and follow-up reminder (days)."
+                  if module == "receivables" else
                   "1. Open Settings. Check the yellow values: business name, overhead method, default "
                   "overhead % and target margin.")),
         ("text", "2. Type one row per item in the yellow cells. Client / Job is required on every row."),
         ("text", dash_tip(module)),
         ("head", "Limits and protection"),
-        ("text", f"Each table holds {N_ROWS} rows. Formula cells are locked without a password, so they "
-                 "are hard to change by mistake. Google Sheets shows protection settings under the Data menu."),
+        ("text", f"Each table holds {N_ROWS} rows. " + (
+            "Formula cells are locked without a password, so they are hard to change by mistake. "
+            "Google Sheets shows protection settings under the Data menu."
+            if PROTECT_ON else
+            "NO PROTECTION version: cells can be changed by mistake and formulas are not locked. "
+            "Make your own copy before you type, and keep this copy for testing only.")),
+
         ("text", "This file organises your records. It is not legal, tax, bookkeeping or accounting advice. "
                  "Check currency and tax rules for your area."),
         ("head", "Example row"),
@@ -518,6 +569,9 @@ def _start_sheet(ws, module, cur, business, layout="laptop"):
 INTERNAL_NOTE = re.compile(r"\d\s*pt\b|\bpt\b|font|row height|column width|refinement|file style|phone view uses", re.I)
 
 
+BIZ_REF = "Settings!$B$7"
+
+
 def build_workbook(module, currency="USD", business=None, layout="laptop", theme=None,
                    protect=True, validations=True, conditional=True, text=None,
                    trade="plumb_elec", style=None, brand=None):
@@ -527,7 +581,7 @@ def build_workbook(module, currency="USD", business=None, layout="laptop", theme
     text: brain text (start_lines, hints). protect / validations / conditional: off for the test variants.
     theme is accepted for old callers and ignored.
     """
-    global PROTECT_ON, VALIDATIONS_ON, CONDITIONAL_ON, NAVY, HEAD, BRAND, TRADE, LAYOUT_NOW, STYLE
+    global PROTECT_ON, VALIDATIONS_ON, CONDITIONAL_ON, NAVY, HEAD, BRAND, TRADE, LAYOUT_NOW, STYLE, BIZ_REF
     global PHONE_BORDER, ACCENT_FILL, ACCENT_FONT, DASH_TAB, OVERRIDE_TEXT
     if module not in PRODUCT_SHEETS:
         raise ValueError(f"unknown product: {module}")
@@ -536,6 +590,7 @@ def build_workbook(module, currency="USD", business=None, layout="laptop", theme
     if trade not in TRADES:
         raise ValueError(f"unknown trade: {trade}")
     BRAND = brand or BRAND_DEFAULT
+    BIZ_REF = "Settings!$B$5" if module == "receivables" else "Settings!$B$7"
     business = business or BRAND
     PROTECT_ON, VALIDATIONS_ON, CONDITIONAL_ON = bool(protect), bool(validations), bool(conditional)
     TRADE = trade
@@ -732,7 +787,7 @@ def _word_width(header):
 DASH_TIPS = {
     "job_costing": "losses and jobs below target margin",
     "change_orders": "approved work with no amount typed, and approved work not billed yet",
-    "receivables": "overdue invoices and follow-ups due now or late",
+    "receivables": "overdue invoices and follow-ups due within your reminder days or late",
     "bundle": "losses, jobs below target margin, approved work with no amount, overdue invoices and follow-ups",
 }
 
