@@ -1056,7 +1056,7 @@ def build_package(ctx, state, version_no):
         poster_status = f"not made: {str(e)[:200]}"
     rows, _blob = mobile_check(ctx, state)
     owner["OWNER_check_report.txt"] = "\n".join(
-        [f"Product: {PRODUCT_TITLES[prod]} | Platform (owner only): {config.PLATFORM_NAME}",
+        [f"Product: {PRODUCT_TITLES[prod]}",
          f"Layout refinement: {'; '.join(changes) or 'no change'}", f"Poster: {poster_status}", ""]
         + [f"{n}: {s}. {d}" for n, s, d in rows] + [""] + [f"{n}: {s}. {d}" for n, s, d in state["checks"]])
     owner["OWNER_checksums.txt"] = "\n".join(f"{h}  {n}" for n, h in manifest.items())
