@@ -38,7 +38,7 @@ CHANGE_TYPES = ["colour", "font", "layout", "feature", "ease_of_use", "complaint
 EVIDENCE_LABELS = ["SOURCE", "USER_INPUT", "GUESS", "UNKNOWN"]
 BRAIN_NAMES = {
     1: "Research (up to 5 passes)", 2: "Gaps and complaints", 3: "Trade profile", 4: "Change plan",
-    5: "Sheet text", 6: "Decision and price", 7: "Payhip listing", 8: "Buyer guide",
+    5: "Sheet text", 6: "Decision and price", 7: "Listing", 8: "Buyer guide",
     9: "Pins and poster", 10: "Mobile and layout reviewer (code)", 11: "Critic and gate (code + AI advisory)",
     12: "Package (code)",
 }
@@ -64,7 +64,7 @@ PROPS = {
     "landscape": "a landscaper with pruning shears", "painters": "a painter with a paint roller",
     "handyman": "a handyman with a toolbox", "other": "a tradesperson with a toolbox",
 }
-SHARED = """You are one brain inside Business Factory 5. The system prepares one product: a spreadsheet workbook for trade businesses, sold on Payhip (a digital download).
+SHARED = """You are one brain inside Business Factory 5. The system prepares one product: a spreadsheet workbook for trade businesses, sold as a digital download.
 Owner notes and feedback are simple Urdu. Buyer-facing text is simple English with short sentences, US spelling.
 EVIDENCE: every claim is labelled SOURCE (with a link), USER_INPUT (pasted or uploaded by the owner), GUESS or UNKNOWN. Never invent numbers, prices, sales, reviews, ratings, competitor counts or trends. Never put a percentage or a money figure in buyer text unless the owner gave it.
 Never promise sales, income or results. No legal, tax or accounting advice. Never copy competitor names, text or brands.
@@ -508,12 +508,12 @@ def fallback_plan(ctx):
     product = ctx["product"] or "job_costing"
     changes = [{"type": "layout", "what": "Phone layout: " + ("; ".join(ctx.get("style_changes", [])) or "kept"),
                 "why": "Easier to read on a phone", "evidence_ids": []},
-               {"type": "content", "what": "Listing rewritten for Payhip with the workbook's real features",
+               {"type": "content", "what": "Listing rewritten with the workbook's real features",
                 "why": "Accurate buyer text", "evidence_ids": []}]
     if ctx["complaints"]:
         changes.append({"type": "complaint_fix", "what": "Clearer steps for the first entry",
                         "why": "Buyer complaint: " + ctx["complaints"][0][:80], "evidence_ids": []})
-    return {"product": product, "summary": "Phone layout refinement and a clearer Payhip listing",
+    return {"product": product, "summary": "Phone layout refinement and a clearer listing",
             "results_considered": "" if ctx.get("results_text", "none") == "none" else "Results were read by the owner",
             "changes": changes}
 
@@ -647,8 +647,8 @@ def fallback_decision(ctx):
                        "go_no_go": ["Did clicks reach 10?", "Did a buyer ask a question?"]}}
 
 
-# ---------------- brain 7: Payhip listing (validation sanitized, never blocks)
-ROLE7 = """TASK: write the Payhip listing for today's product. Payhip is the store; the product is a digital download (.xlsx).
+# ---------------- brain 7: listing (validation sanitized, never blocks)
+ROLE7 = """TASK: write the listing for today's product. The product is a digital download (.xlsx) with two layouts and two protection options.
 Include: 3 title options (product keyword first, 70 characters or fewer); a 2-line hook; a description of at least 300 characters that says in plain words what the workbook does; what is included (4 or more); 3 how-to steps; what it does NOT do (2 or more); requirements (2 or more, naming Google Sheets or Excel); 8 tags; 5 FAQ questions.
 Rules: never use the words offline, free, gumroad or nurture. Never write a percentage or a money figure. Never mention internal notes, fonts, row heights or layout tuning. Do not claim a feature that is not in the list of included items.
 Shape: {"titles": [3 strings], "hook": "...", "description": "...", "included": [4 or more], "how_to": [3], "not_included": [2 or more], "requirements": [2 or more], "tags": [8], "faq": [{"q": "...", "a": "..."}] (exactly 5)}"""
@@ -691,7 +691,7 @@ def sanitize_listing(d, product):
         if q not in [x["q"] for x in faq]:
             faq.append({"q": q, "a": a})
     return {"titles": titles, "hook": hook, "description": desc, "included": included, "how_to": how[:3],
-            "not_included": not_inc, "requirements": req, "tags": tags, "faq": faq[:5], "platform": "Payhip"}
+            "not_included": not_inc, "requirements": req, "tags": tags, "faq": faq[:5]}
 
 
 def brain7(ctx):
@@ -981,25 +981,33 @@ def run_pipeline(state, ctx, save, pins_on=True):
 
 
 # ---------------- brain 12: package (code only)
-DOCS = [
-    ("01_research.json", "1", "Research (merged passes, with sources)"),
-    ("02_gaps_and_complaints.json", "2", "Gaps and complaints"),
-    ("03_trade_profile.json", "3", "Trade profile"),
-    ("04_change_plan.json", "4", "Change plan: what is different from the last version, and why"),
-    ("05_sheet_text.json", "5", "Sheet text (START HERE and tab hints)"),
-    ("06_decision_and_price_test.json", "6", "Decision and price test (ESTIMATE ranges)"),
-    ("07_payhip_listing.json", "7", "Payhip listing, FAQ and tags"),
-    ("08_buyer_guide.json", "8", "Buyer guide"),
-    ("09_pins.json", "9", "Pinterest pins"),
+BUYER_FILES = [
+    ("1_Google_Sheets_LOCKED.xlsx", "phone", True, "Phone layout for Google Sheets. Formulas are protected."),
+    ("2_Google_Sheets_UNLOCKED.xlsx", "phone", False, "Phone layout for Google Sheets. Every cell can be changed: make a copy before you type."),
+    ("3_Excel_Laptop_LOCKED.xlsx", "laptop", True, "Laptop layout for Excel. Formulas are protected."),
+    ("4_Excel_Laptop_UNLOCKED.xlsx", "laptop", False, "Laptop layout for Excel. Every cell can be changed: make a copy before you type."),
 ]
-HOW_TO = """ادائیگی سے پہلے یہ مراحل کریں (صرف اپنے لیے)
-1. ZIP کھولیں۔ لیپ ٹاپ فائل کمپیوٹر کے لیے، فون فائل فون کے لیے ہے۔
-2. google_test فولڈر کی دو فائلیں گوگل ڈرائیو پر اپلوڈ کر کے Google Sheets میں کھولیں: plain، no_protection۔ جو ٹھیک کھلے وہی اصل فائل بنے گی۔
-3. Payhip پر نیا ڈیجیٹل پروڈکٹ بنائیں، xlsx فائل اپلوڈ کریں، لسٹنگ (07) چسپاں کریں، قیمت فیصلے (06) کے مطابق اور ملک کی کرنسی کے ساتھ رکھیں۔
-4. پوسٹر (12_pinterest_poster.png) اور پن (09) Pinterest پر خود پوسٹ کریں۔
-5. گیٹ کی رپورٹ (12_quality_gate.txt) اور فون کی جانچ (11_mobile_check.txt) دیکھیں، پھر اپلوڈ کریں۔
-کسی بھی پلیٹ فارم کے موجودہ قواعد اپلوڈ سے پہلے خود دیکھیں۔ یہ قانونی یا ٹیکس مشورہ نہیں۔
-"""
+
+
+def how_to_text(out, prod):
+    """The buyer's how-to file: plain English, built from the guide brain's sections."""
+    secs = (out.get("8") or {}).get("sections") or sanitize_guide({}, prod)["sections"]
+    lines = [PRODUCT_TITLES[prod], "", "How to use this download", "", "Files in this download:"]
+    lines += [f"  {name}: {desc}" for name, _layout, _locked, desc in BUYER_FILES]
+    lines += ["", "Works in Google Sheets and Microsoft Excel (.xlsx). No macros.",
+              "Use the LOCKED files for everyday work. Use an UNLOCKED file only if you want to change the layout.", ""]
+    for sec in secs:
+        lines += [sec["title"], sec["text"], ""]
+    lines += ["This is a tracking tool. It is not tax, legal or accounting advice."]
+    return "\n".join(lines) + "\n"
+
+
+def _zip(files):
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for name, data in files.items():
+            z.writestr(name, data if isinstance(data, bytes) else data.encode("utf-8"))
+    return buf.getvalue()
 
 
 def package_member(zip_bytes, name):
@@ -1012,7 +1020,7 @@ def package_member(zip_bytes, name):
 
 
 def build_package(ctx, state, version_no):
-    """Workbooks, Google test files, documents, the poster and checksums. Returns (zip bytes, manifest)."""
+    """Returns (buyer ZIP, owner ZIP, checksums). The buyer ZIP is the upload: four workbooks and the how-to."""
     ctx = normalize_ctx(ctx)
     out = {k: v["data"] for k, v in state["brains"].items()}
     prod = state["product"]
@@ -1020,55 +1028,37 @@ def build_package(ctx, state, version_no):
     cur, biz, brand, trade = ctx["currency"], ctx["business"], ctx["brand"], ctx["trade"]
     style = state.get("style") or ctx["style"]
     changes = state.get("style_changes") or ctx.get("style_changes", [])
-    base = f"{_safe(biz)}_{prod}_v{version_no}"
     kw = dict(trade=trade, style=style, text=text, brand=brand)
-    laptop_book = sheets.build_workbook(prod, cur, biz, "laptop", **kw)
-    phone_book = sheets.build_workbook(prod, cur, biz, "phone", **kw)
-    files = {
-        f"{base}_laptop.xlsx": laptop_book,
-        f"{base}_phone.xlsx": phone_book,
-        f"google_test/{base}_plain.xlsx": sheets.build_workbook(prod, cur, biz, "laptop", protect=False,
-                                                               validations=False, conditional=False, **kw),
-        f"google_test/{base}_no_protection.xlsx": sheets.build_workbook(prod, cur, biz, "laptop", protect=False, **kw),
-    }
-    for fname, n, title in DOCS:
-        files[fname] = f"{title}\n\n" + json.dumps(out[n], ensure_ascii=False, indent=2)
+    buyer = {name: sheets.build_workbook(prod, cur, biz, layout, protect=locked, **kw)
+             for name, layout, locked, _desc in BUYER_FILES}
+    buyer["00_HOW_TO_USE.txt"] = how_to_text(out, prod)
+    manifest = {name: hashlib.sha256(d if isinstance(d, bytes) else d.encode("utf-8")).hexdigest()
+                for name, d in buyer.items()}
+    owner = {}
+    poster_status = "not made"
     try:
+        laptop_book = sheets.build_workbook(prod, cur, biz, "laptop", **kw)
+        phone_book = sheets.build_workbook(prod, cur, biz, "phone", **kw)
         laptop_png = poster.screen_or_table(poster.add_sample_rows(laptop_book, prod, sheets), prod, "laptop")
         uploaded = ctx.get("phone_shot")
-        phone_sample = not uploaded
-        if uploaded:
-            phone_png = uploaded
-        else:
-            phone_png = poster.screen_or_table(poster.add_sample_rows(phone_book, prod, sheets, layout="phone"), prod, "phone")
+        phone_png = uploaded or poster.screen_or_table(
+            poster.add_sample_rows(phone_book, prod, sheets, layout="phone"), prod, "phone")
         pdata = out.get("9", {}).get("poster") or {}
         headline = pdata.get("headline") or poster.HEADLINES.get(trade, poster.HEADLINES["other"])
-        png, status = poster.make_poster(trade, prod, ctx["trade_label"], brand,
-                                         sheets.TRADES[trade]["primary"], sheets.TRADES[trade]["accent"],
-                                         laptop_png, phone_png, laptop_sample=True, phone_sample=phone_sample,
-                                         headline=headline, tagline=pdata.get("tagline"),
-                                         badges=pdata.get("badges"), cta=pdata.get("cta"))
-        files["12_pinterest_poster.png"] = png
-        files["12b_poster_status.txt"] = (f"Headline: {headline}\nScreens: {status}\n"
-                                          "Text is drawn by code. Screens are the real workbook; sample rows are marked SAMPLE.")
+        png, poster_status = poster.make_poster(trade, prod, ctx["trade_label"], brand,
+                                                sheets.TRADES[trade]["primary"], sheets.TRADES[trade]["accent"],
+                                                laptop_png, phone_png, laptop_sample=True,
+                                                phone_sample=not uploaded, headline=headline,
+                                                tagline=pdata.get("tagline"), badges=pdata.get("badges"),
+                                                cta=pdata.get("cta"))
+        owner["OWNER_pinterest_poster.png"] = png
     except Exception as e:  # the poster is optional; the workbooks are the product
-        files["12b_poster_status.txt"] = (f"Poster not made: {str(e)[:200]}. "
-                                          "The workbooks are complete without it.")
-    rows, _ = mobile_check(ctx, state)
-    files["11_mobile_check.txt"] = "\n".join(f"{n}: {s}. {d}" for n, s, d in rows)
-    files["12_quality_gate.txt"] = "\n".join(f"{n}: {s}. {d}" for n, s, d in state["checks"])
-    files["10_poster_brief.txt"] = f"Trade: {ctx['trade_label']}\nHeadline: {headline}\nBrand: {brand}\nPalette: {sheets.TRADES[trade]['palette']}"
-    files["13_sheet_specification.txt"] = sheets.spec_text(prod, cur, biz)
-    files["14_how_to_upload.txt"] = HOW_TO
-    files["layout_refinement.txt"] = "\n".join(changes) or "no change"
-    manifest = {name: hashlib.sha256(d if isinstance(d, bytes) else d.encode("utf-8")).hexdigest()
-                for name, d in files.items()}
-    files["MANIFEST.txt"] = "\n".join(f"{h}  {n}" for n, h in manifest.items())
-    files["README.txt"] = ("Made with Business Factory 5 for " + brand + " (Payhip listing). Check every file yourself. "
-                           "Read the current Payhip and Pinterest rules before you publish. Upload and post manually. "
-                           "Not legal, tax or accounting advice.\n")
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-        for name, data in files.items():
-            z.writestr(name, data if isinstance(data, bytes) else data.encode("utf-8"))
-    return buf.getvalue(), manifest
+        poster_status = f"not made: {str(e)[:200]}"
+    rows, _blob = mobile_check(ctx, state)
+    owner["OWNER_check_report.txt"] = "\n".join(
+        [f"Product: {PRODUCT_TITLES[prod]} | Platform (owner only): {config.PLATFORM_NAME}",
+         f"Layout refinement: {'; '.join(changes) or 'no change'}", f"Poster: {poster_status}", ""]
+        + [f"{n}: {s}. {d}" for n, s, d in rows] + [""] + [f"{n}: {s}. {d}" for n, s, d in state["checks"]])
+    owner["OWNER_checksums.txt"] = "\n".join(f"{h}  {n}" for n, h in manifest.items())
+    owner["OWNER_brain_outputs.json"] = json.dumps(out, ensure_ascii=False, indent=2)
+    return _zip(buyer), _zip(owner), manifest
