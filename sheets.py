@@ -107,7 +107,8 @@ COLUMNS = {
         ("Invoice amount (required)", "money", 15, None, None),
         ("Amount paid", "money", 14, None, None),
         ("Balance due", "c_money", 14, '=IF(OR(B{r}="",E{r}=""),"",E{r}-F{r})', None),
-        ("Days past due", "c_int", 11, '=IF(OR(B{r}="",D{r}=""),"",IF(G{r}<=0,0,MAX(0,TODAY()-D{r})))', None),
+        ("Days past due", "c_int", 11,
+         '=IF(OR(B{r}="",AND(C{r}="",D{r}="")),"",IF(G{r}<=0,0,MAX(0,TODAY()-IF(D{r}="",C{r}+Settings!$B$4,D{r}))))', None),
         ("Aging", "c_text", 14,
          '=IF(B{r}="","",IF(E{r}="","Check amount",IF(G{r}<=0,"Paid",IF(H{r}="","No due date",IF(H{r}=0,"Not yet due",'
          'IF(H{r}<=30,"1-30 days",IF(H{r}<=60,"31-60 days",IF(H{r}<=90,"61-90 days","90+ days"))))))))', None),
@@ -132,10 +133,10 @@ HINTS = {
 }
 
 EXAMPLES = {
-    JOB: ["Job ID J-001 | Client / Job: Kitchen sink repair | Quote: 350 | Labor: 3 h x 45 = 135 | "
+    JOB: ["Job ID J-001 | Client / Job: {TRADE_EXAMPLE} | Quote: 350 | Labor: 3 h x 45 = 135 | "
           "Materials: 40 | Direct cost: 175 | Overhead: 12% of direct cost = 21 | Total cost: 196 | "
           "Profit: 154 | Margin: 44%"],
-    EXTRA: ["Change ID C-001 | Job / Client: Kitchen sink repair | Extra work: replace shut-off valve | "
+    EXTRA: ["Change ID C-001 | Job / Client: {TRADE_EXAMPLE} | Extra work: one extra item agreed in writing | "
             "Labor: 1 h x 45 = 45 | Materials: 30 | Markup 20% | Proposed charge: (45 + 30) x 1.20 = 90 | "
             "Client decision: Approved | Approved amount: 90 | Billing: Not billed"],
     INV: ["Invoice # 1001 | Client / Job: Smith house | Invoice date: 2026-10-01 | Due date: 2026-10-31 | "
@@ -334,7 +335,7 @@ def _data_sheet(wb, name, cur, layout="laptop"):
 def _settings_sheet(wb, cur, business, module=""):
     ws = wb.create_sheet(SET)
     ws.merge_cells("A1:C1")
-    ws["A1"] = f"SETTINGS • {BRAND} • change the yellow cells only"
+    ws["A1"] = f'={BIZ_REF}&" • SETTINGS • change the yellow cells only"'
     ws["A1"].font = _font(True, 14, "FFFFFF")
     ws["A1"].fill = _fill(NAVY)
     ws.row_dimensions[1].height = 30
@@ -357,8 +358,11 @@ def _settings_sheet(wb, cur, business, module=""):
     ]
     if module == "receivables":
         rows = [
+            ("Default payment terms (days)", 30, "text",
+             "Used to calculate Due date if left blank. 30 days is only an example."),
+            ("Late fee %", 0, "pct", "Late fee charged on overdue balance. 0% means no late fee."),
             ("Follow-up reminder (days)", 7, "text",
-             "Dashboard counts Next follow-up dates within this many days, and any that are already late."),
+             "Dashboard warns when Next follow-up is within this many days."),
             ("Your business name", business, "text", "Shown on START HERE and in the Dashboard title."),
             ("Currency", cur, "c_text", "Set when this file was built. To change it, build the file again."),
             ("Trade", TRADES[TRADE]["label"], "text", "Your trade. Pick one from the list. It sets the header colours."),
@@ -387,6 +391,13 @@ def _settings_sheet(wb, cur, business, module=""):
             dvr.showErrorMessage = True
             ws.add_data_validation(dvr)
             dvr.add("B4")
+            dvr.add("B6")
+            dvp = DataValidation(type="decimal", operator="between", formula1="0", formula2="1", allow_blank=False)
+            dvp.error = "Type a percent from 0% to 100%, for example 0% or 5%."
+            dvp.errorTitle = "Late fee"
+            dvp.showErrorMessage = True
+            ws.add_data_validation(dvp)
+            dvp.add("B5")
         else:
             dv = DataValidation(type="list", formula1='"Direct cost,Quote"', allow_blank=False)
             ws.add_data_validation(dv)
@@ -414,7 +425,7 @@ def dashboard_blocks(module):
             ("Total profit", f"=SUM({o})", "c_money", ""),
             ("Overall profit margin", f'=IFERROR(SUM({o})/SUM({d}),"")', "c_pct", ""),
             ("Jobs with a loss", f'=COUNTIFS({o},"<0")', "c_int", "Look at these jobs first"),
-            ("Jobs below target margin", f'=COUNTIFS({p},"<"&Settings!$B$6)', "c_int",
+            ("Jobs below target margin", f'=COUNTIFS(\'Job Costing\'!$P$4:$P$303,"<"&Settings!$B$6,\'Job Costing\'!$P$4:$P$303,"<>",\'Job Costing\'!$B$4:$B$303,"<>")', "c_int",
              "Target is set in Settings"),
         ]))
     if module in ("change_orders", "bundle"):
@@ -446,7 +457,11 @@ def dashboard_blocks(module):
             ("Aging: not yet due", f'=SUMIFS({g},{i_},"Not yet due")', "c_money", "Due date is today or later."),
             ("Aging: no due date", f'=SUMIFS({g},{i_},"No due date")', "c_money", "Invoices with no Due date typed."),
             ("Credit (paid more than invoiced)", f'=SUMIF({g},"<0")', "c_money", "Shown as a negative number. Not counted as owed."),
-            (("Follow-ups due within reminder days or late", f'=COUNTIFS({ll},"<="&(TODAY()+Settings!$B$4),{g},">0")', "c_int",
+            *((("Late fee estimate on overdue balance",
+                "=SUMIFS('Invoice Tracker'!$G$4:$G$303,'Invoice Tracker'!$J$4:$J$303,\"Overdue\")*Settings!$B$5",
+                "c_money", "Estimate only, from Late fee % in Settings. Check your contract and local rules first."),)
+              if module == "receivables" else ()),
+            (("Follow-ups due within reminder days or late", f'=COUNTIFS({ll},"<="&(TODAY()+Settings!$B$6),{g},">0",\'Invoice Tracker\'!$B$4:$B$303,"<>")', "c_int",
               "Contact these clients today or this week.") if module == "receivables" else
              ("Follow-ups due now or late", f'=COUNTIFS({ll},"<="&TODAY(),{g},">0")', "c_int",
               "Contact these clients today.")),
@@ -536,7 +551,7 @@ def _start_sheet(ws, module, cur, business, layout="laptop"):
         ("text", "This file organises your records. It is not legal, tax, bookkeeping or accounting advice. "
                  "Check currency and tax rules for your area."),
         ("head", "Example row"),
-    ] + [("example", EXAMPLES[s][0]) for s in PRODUCT_SHEETS[module]] + [("example", EXAMPLE_NOTE)]
+    ] + [("example", EXAMPLES[s][0].replace("{TRADE_EXAMPLE}", TRADES[TRADE]["example"])) for s in PRODUCT_SHEETS[module]] + [("example", EXAMPLE_NOTE)]
     rows = rows[:2] + [("text", s) for s in OVERRIDE_TEXT.get("start_lines", [])] + rows[2:]
     r = 1
     for kind, text in rows:
@@ -590,7 +605,7 @@ def build_workbook(module, currency="USD", business=None, layout="laptop", theme
     if trade not in TRADES:
         raise ValueError(f"unknown trade: {trade}")
     BRAND = brand or BRAND_DEFAULT
-    BIZ_REF = "Settings!$B$5" if module == "receivables" else "Settings!$B$7"
+    BIZ_REF = "Settings!$B$7"
     business = business or BRAND
     PROTECT_ON, VALIDATIONS_ON, CONDITIONAL_ON = bool(protect), bool(validations), bool(conditional)
     TRADE = trade
