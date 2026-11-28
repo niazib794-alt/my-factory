@@ -43,12 +43,19 @@ class EngineError(Exception):
     pass
 
 
+KEY_SHAPES = [re.compile(p) for p in (
+    r"AIza[0-9A-Za-z_\-]{20,}", r"gsk_[0-9A-Za-z]{20,}", r"sk-[0-9A-Za-z_\-]{16,}", r"tvly-[0-9A-Za-z_\-]{16,}",
+    r"(?i)(bearer\s+)[0-9A-Za-z._\-]{12,}", r"(?i)(x-goog-api-key[\"':=\s]+)[0-9A-Za-z_\-]{12,}")]
+
+
 def scrub(text, keys):
-    """Remove every key from a message before it is stored or shown."""
+    """Remove every known key, and anything shaped like a provider key, before a message is stored or shown."""
     s = str(text)
     for k in keys:
         if k:
             s = s.replace(k, "***")
+    for rx in KEY_SHAPES:
+        s = rx.sub(lambda m: (m.group(1) + "***") if m.lastindex else "***", s)
     return s[:300]
 
 
@@ -149,8 +156,12 @@ def run_job(job, system, user, slots, log, keys, images=(), grounding=False, sou
     if not entries:
         raise EngineError("No AI slot is ready. Enter a key and a model name in the sidebar.")
     errs = []
+    skipped = []
     for e in entries:
         if images and e["kind"] != "gemini":
+            continue
+        if e["name"] in DEAD:
+            skipped.append(e["name"])
             continue
         t0 = time.time()
         try:
@@ -165,6 +176,8 @@ def run_job(job, system, user, slots, log, keys, images=(), grounding=False, sou
             errs.append(f"{e['name']}: {msg[:140]}")
     if images:
         raise EngineError("Screenshots need a Gemini slot with a key. " + "; ".join(errs))
+    if not errs and skipped:
+        raise EngineError("These AI keys were refused earlier and are skipped: " + ", ".join(skipped) + ". Fix them, then press Test all keys now.")
     raise EngineError("; ".join(errs) or "No slot answered.")
 
 
