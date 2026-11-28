@@ -337,6 +337,14 @@ def merge_evidence(items):
     return out
 
 
+def template_evidence(ctx):
+    """Deterministic evidence from the product's own facts, labelled GUESS. Makes no AI call."""
+    f = FACTS[ctx["product"] or "job_costing"]
+    return merge_evidence([{"text": f["hook"], "label": "GUESS", "source": "", "angle": "product features"}]
+                          + [{"text": x, "label": "GUESS", "source": "", "angle": "product features"}
+                             for x in f["included"]])
+
+
 def brain1(ctx):
     n = max(RESEARCH_MIN, min(RESEARCH_MAX, int(ctx.get("research_passes", RESEARCH_DEFAULT))))
     items, passes, slots_used, failed = [], [], [], []
@@ -346,7 +354,8 @@ def brain1(ctx):
         if ctx.get("use_web") and (ctx.get("tavily_keys") or ctx.get("tavily_key")):
             tkeys = ctx.get("tavily_keys") or [ctx["tavily_key"]]
             query = f"{ctx['trade_label']} {qword} spreadsheet {ctx['market']}"
-            for tk in tkeys:
+            start = i % len(tkeys)
+            for tk in tkeys[start:] + tkeys[:start]:
                 try:
                     web_items = []
                     web_text = engine.tavily(tk, query, web_items)
@@ -371,10 +380,7 @@ def brain1(ctx):
         slots_used.append(slot)
     merged = merge_evidence(items)
     if not merged:
-        merged = merge_evidence([{"text": b, "label": "GUESS", "source": "", "angle": "product features"}
-                                 for b in FACTS[ctx["product"] or "job_costing"]["hook"].split(". ")] +
-                                [{"text": f, "label": "GUESS", "source": "", "angle": "product features"}
-                                 for f in FACTS[ctx["product"] or "job_costing"]["included"]])
+        merged = template_evidence(ctx)
         slot = "template (no pass answered)"
     else:
         slot = " + ".join(dict.fromkeys(slots_used))
@@ -807,7 +813,8 @@ BRAIN_FN = {1: brain1, 2: brain2, 3: brain3, 4: brain4, 5: brain5, 6: brain6, 7:
 
 def _template_for(n, ctx):
     if n == 1:
-        return brain1(dict(ctx, use_web=False, images=[]))
+        return ({"items": template_evidence(ctx), "passes": [], "requested": 0, "failed": ["template"]},
+                "template")
     if n == 2:
         return ({"gaps": [], "complaints_used": [], "no_gap_reason": "Not enough evidence to name a gap; the workbook's own features are used."}, "template")
     if n == 3:
@@ -915,7 +922,7 @@ def brain11(ctx, state):
             checks.append(("AI critic (advisory)", "WARNING", "skipped: " + engine.scrub(e, ctx["keys"])[:120]))
     if any(s == "WARNING" for _, s, _ in checks):
         warn.append("some checks show warnings; read them before approving")
-    verdict = "BLOCK" if block else ("FIX" if fix else "PASS")
+    verdict = "BLOCK" if block else "PASS"
     checks.append(("Overall gate", verdict, f"{len(checks)} checks, {len(warn)} warning(s)"))
     problems = problems + [w for w in warn]
     return {"verdict": verdict, "checks": checks, "fix_brains": sorted(fix), "problems": problems}
