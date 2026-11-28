@@ -734,7 +734,7 @@ def start_text_problems(lines, headers, dashboard_labels=()):
         if INTERNAL_NOTE.search(str(line)):
             probs.append(f"internal note, not for the buyer: {str(line)[:70]}")
         for word in FORBIDDEN_CLAIMS:
-            if word in low:
+            if re.search(r"\b" + re.escape(word), low):
                 probs.append(f"'{word}' is not in the workbook: {str(line)[:70]}")
         for key, terms in REQUIRED_TERMS.items():
             if key in low and not any(term in h for term in terms for h in haystack):
