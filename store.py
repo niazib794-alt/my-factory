@@ -6,6 +6,8 @@ Every approval writes a backup file. Files are written atomically (temp file, th
 """
 import hashlib
 import json
+import re
+import math
 import os
 import uuid
 from datetime import datetime
@@ -34,9 +36,11 @@ def sha256(data):
 
 def write_json(path, obj):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + ".tmp"
+    tmp = f"{path}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(obj, f, ensure_ascii=False, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
     os.replace(tmp, path)
 
 
@@ -56,9 +60,23 @@ def new_project(name, audience, currency, business, markets):
             "versions": [], "run": None, "chat": [], "pending_notes": ""}
 
 
+VALID_ID = re.compile(r"^[a-f0-9]{12}$")
+
+
+def check_id(pid):
+    """Project ids become file names, so only the 12-character hex form is allowed."""
+    if not isinstance(pid, str) or not VALID_ID.match(pid):
+        raise ValueError("this project id is not valid")
+    return pid
+
+
+def new_id():
+    return uuid.uuid4().hex[:12]
+
+
 def save_project(p):
     p["updated"] = now()
-    write_json(os.path.join(PROJECTS, p["id"] + ".json"), p)
+    write_json(os.path.join(PROJECTS, check_id(p.get("id")) + ".json"), p)
     return True
 
 
@@ -75,6 +93,8 @@ def list_projects():
 
 
 def load_project(pid):
+    if not VALID_ID.match(str(pid)):
+        return None
     d = read_json(os.path.join(PROJECTS, pid + ".json"), None)
     if not isinstance(d, dict) or d.get("schema") != SCHEMA:
         raise ValueError("project not found, or saved by another version")
@@ -91,6 +111,14 @@ def import_bytes(raw):
     d = json.loads(raw.decode("utf-8"))
     if not isinstance(d, dict) or d.get("schema") != SCHEMA:
         raise ValueError("not a Business Factory 5 project file")
+    for key in ("versions", "complaints", "complaint_log", "results"):
+        if key in d and not isinstance(d[key], list):
+            raise ValueError(f"'{key}' must be a list")
+    if any(not isinstance(v, dict) for v in d.get("versions", [])):
+        raise ValueError("every version must be an object")
+    if not VALID_ID.match(str(d.get("id", ""))):
+        d["id"] = new_id()
+    d["name"] = str(d.get("name", "Imported project"))[:120]
     return d
 
 
@@ -105,7 +133,7 @@ def archive_complaints(p, version_no, addressed):
 
 
 def backup_version(p, version_no):
-    path = os.path.join(BACKUPS, f"{p['id']}_v{version_no}.json")
+    path = os.path.join(BACKUPS, f"{check_id(p.get('id'))}_v{version_no}.json")
     write_json(path, p)
     return os.path.basename(path)
 
@@ -132,12 +160,16 @@ def add_result(p, version_no, date, views, saves, clicks, sales):
     vals = []
     for x in (views, saves, clicks, sales):
         try:
-            v = int(float(str(x).strip() or 0))
+            f = float(str(x).strip() or 0)
         except ValueError:
             raise ValueError("views, saves, clicks and sales must be numbers")
-        if v < 0:
+        if not math.isfinite(f):
+            raise ValueError("numbers must be finite")
+        if f != int(f):
+            raise ValueError("use whole numbers only, for example 120 (not 2.9)")
+        if f < 0:
             raise ValueError("numbers cannot be negative")
-        vals.append(v)
+        vals.append(int(f))
     ver = next((v for v in p["versions"] if v["v"] == version_no), None)
     if ver is None:
         raise ValueError("version not found")
@@ -202,3 +234,10 @@ def last_style(p):
         if v.get("style"):
             return v["style"]
     return None
+
+
+def snapshot_differences(snapshot, current):
+    """Settings that changed since a run started. Only names are compared; API keys are never stored."""
+    labels = {"audience": "customer", "market": "market", "currency": "currency", "brand": "brand",
+              "notes": "notes", "complaints": "complaints", "pins_on": "pins"}
+    return [label for k, label in labels.items() if k in snapshot and snapshot.get(k) != current.get(k)]
