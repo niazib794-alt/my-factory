@@ -57,13 +57,6 @@ def secret(name, default=""):
     return str(v).strip() if v not in (None, "") else default
 
 
-def member(zip_bytes, suffix):
-    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as z:
-        for n in z.namelist():
-            if n.endswith(suffix):
-                return n, z.read(n)
-    return None, None
-
 
 def models_ready(slots, tav_keys):
     """The product opens when at least one AI key and, if Tavily keys are set, one Tavily key have passed
@@ -312,6 +305,7 @@ with tab_make:
     prod_choice = st.selectbox("Product", [AUTO] + list(brains.PRODUCT_TITLES.values()), key="prod_sel")
     trade_label = st.selectbox("Target customer (choose from the list)", sheets.TRADE_LABELS, key="trade_sel")
     trade_key = TRADE_KEY_BY_LABEL[trade_label]
+    ss["trade_key"] = trade_key
     tr = sheets.TRADES[trade_key]
     st.markdown(
         f"{chip('header ' + tr['primary'], tr['primary'])} {chip('accent ' + tr['accent'], tr['accent'])} "
@@ -380,7 +374,11 @@ with tab_make:
             state["style"], state["style_changes"] = style, style_changes
             state["inputs"] = {"mode": mode, "pasted": pasted or "", "source": source, "passes": passes,
                                "use_web": bool(use_web), "gemini_search": bool(use_gem), "gemini_sources": [],
-                               "web_items": 0}
+                               "web_items": 0,
+                               "snapshot": {"audience": trade_label, "market": market, "currency": currency,
+                                            "brand": brand, "notes": notes, "complaints": list(complaints),
+                                            "pins_on": bool(pins_on),
+                                            "slots": [s_["name"] for s_ in slots if s_.get("on", True)]}}
             state["trade"] = trade_key
             proj["run"] = state
             resume_clicked = True
@@ -394,6 +392,16 @@ with tab_make:
             inp = state.get("inputs", {})
             imgs = [(f.type or "image/png", f.getvalue()) for f in (shots or [])[:10]]
             prev = proj["versions"][-1] if proj["versions"] else None
+            snap = inp.get("snapshot")
+            if snap:
+                current = {"audience": trade_label, "market": market, "currency": currency, "brand": brand,
+                           "notes": notes, "complaints": complaints, "pins_on": bool(pins_on)}
+                changed = store.snapshot_differences(snap, current)
+                if changed:
+                    st.warning("This run started with different " + ", ".join(changed) +
+                               ". It will use the original values. Start a new run to change them.")
+                trade_label, market, currency, brand = snap["audience"], snap["market"], snap["currency"], snap["brand"]
+                notes, complaints, pins_on = snap["notes"], snap["complaints"], snap["pins_on"]
             ctx = {
                 "product": state["product"] if state.get("product_fixed") else None,
                 "product_fixed": bool(state.get("product_fixed")),
@@ -507,12 +515,24 @@ with tab_make:
                         "results_considered": plan.get("results_considered", ""),
                         "brains": state["brains"], "checks": state["checks"], "manifest": manifest,
                         "results": [], "approved": True})
-                    store.archive_complaints(proj, version_no, "complaint_fix" in types)
+                    prev_complaints = list(proj.get("complaints", []))
+                    prev_log = len(proj.get("complaint_log", []))
+                    try:
+                        store.archive_complaints(proj, version_no, "complaint_fix" in types)
+                        store.save_project(proj)
+                        backup = store.backup_version(proj, version_no)
+                        store.record_daily({"date": store.today(), "project": proj["id"], "v": version_no,
+                                            "product": state["product"], "types": types, "approved": True})
+                    except Exception as e:
+                        # undo this approval completely, so a retry does not create a duplicate version
+                        del proj["versions"][version_no - 1:]
+                        proj["complaints"] = prev_complaints
+                        del proj.get("complaint_log", [])[prev_log:]
+                        store.save_project(proj)
+                        ss["flash"] = ("error", f"Approval was NOT saved (nothing changed). Try again. ({str(e)[:160]})")
+                        st.rerun()
                     proj["run"] = None
                     store.save_project(proj)
-                    backup = store.backup_version(proj, version_no)
-                    store.record_daily({"date": store.today(), "project": proj["id"], "v": version_no,
-                                        "product": state["product"], "types": types, "approved": True})
                     ss["pkg"], ss["pkg_name"] = zip_bytes, f"{store.today()}_{state['product']}_v{version_no}"
                     ss["pkg_owner"] = owner_bytes
                     ss["flash"] = ("success", f"Version {version_no} approved. Backup saved: {backup}")
